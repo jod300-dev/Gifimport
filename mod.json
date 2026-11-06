@@ -8,9 +8,9 @@
 	},
 	"id": "patasma.gif_importer",
 	"name": "GIF Importer",
-	"version": "v0.2.1-beta",
+	"version": "v0.3.0-beta",
 	"developer": "Patasma",
-	"description": "Importa GIFs animados al editor usando Alpha triggers + Spawn triggers en bucle infinito. Eliges objetos por frame y metodo de imagen (17 metodos). BETA.",
+	"description": "Importa GIFs animados al editor con Alpha triggers + Spawn triggers en bucle infinito. Metodo de parches: el fondo se traza una vez y cada frame solo lleva lo que cambia. BETA.",
 	"resources": {
 		"spritesheets": {
 			"GifBtn": [
@@ -19,7 +19,7 @@
 		}
 	},
 	"settings": {
-		"title-gif": {
+		"title-anim": {
 			"name": "Animacion",
 			"type": "title"
 		},
@@ -39,13 +39,21 @@
 			"name": "Retardo minimo por frame (s)",
 			"description": "Ningun frame dura menos que esto. GD no puede cambiar de frame mas rapido que sus ticks; <cy>0.03</c> es seguro."
 		},
+		"max-frames": {
+			"type": "int",
+			"default": 40,
+			"min": 2,
+			"max": 300,
+			"name": "Frames maximos",
+			"description": "Si el GIF tiene mas frames, se reparten de forma uniforme y se conserva la duracion total."
+		},
 		"max-total-objects": {
 			"type": "int",
 			"default": 40000,
 			"min": 2000,
 			"max": 150000,
 			"name": "Tope total de objetos",
-			"description": "Objetos de todos los frames + triggers. Si frames x objetos por frame se pasa, se recortan los objetos por frame."
+			"description": "Fondo + parches + triggers. Si se pasa, se recortan los objetos por frame."
 		},
 		"first-group": {
 			"type": "int",
@@ -53,13 +61,21 @@
 			"min": 1,
 			"max": 9000,
 			"name": "Primer grupo",
-			"description": "Los grupos se asignan por encima del grupo mas alto que ya use el nivel, pero nunca por debajo de este numero. Se usan <cy>2 x frames + 2</c> grupos."
+			"description": "Los grupos se asignan por encima del grupo mas alto que ya use el nivel, pero nunca por debajo de este numero. Se usan <cy>2 x frames + 1</c> grupos."
 		},
 		"triggers-at-start": {
 			"type": "bool",
 			"default": true,
-			"name": "Arrancar al inicio del nivel",
-			"description": "Los 2 triggers de arranque se colocan en x=-30 para que la animacion empiece al comenzar. Si lo desactivas, empiezan junto al borde izquierdo de la imagen (arranca cuando el jugador llega)."
+			"name": "Arrancar en la x de abajo",
+			"description": "Activado: el trigger de arranque va en la x de <cy>Trigger de arranque: x</c> (inicio del nivel). Desactivado: va junto al borde izquierdo de la imagen (arranca cuando el jugador llega)."
+		},
+		"trigger-x": {
+			"type": "int",
+			"default": 0,
+			"min": -2000,
+			"max": 100000,
+			"name": "Trigger de arranque: x",
+			"description": "Posicion x del trigger que arranca el bucle. <cy>0</c> = inicio del nivel. Si la animacion no arranca prueba con <cy>15</c> o <cy>-30</c>, o desactiva la opcion de arriba."
 		},
 		"threads": {
 			"type": "int",
@@ -70,20 +86,8 @@
 			"description": "Frames que se convierten a la vez. Bajalo en moviles lentos."
 		},
 		"title-patch": {
-			"name": "Metodo 18: Estatico + parches",
+			"name": "Metodo de parches",
 			"type": "title"
-		},
-		"patch-tracer": {
-			"type": "string",
-			"default": "BSP",
-			"name": "Trazador de fondo y parches",
-			"one-of": [
-				"BSP",
-				"Quadtree",
-				"Regiones",
-				"Cuadricula"
-			],
-			"description": "Metodo de imagen con el que se trazan el fondo estatico y los parches. <cy>BSP</c> es el recomendado."
 		},
 		"patch-tolerance": {
 			"type": "int",
@@ -91,7 +95,7 @@
 			"min": 4,
 			"max": 120,
 			"name": "Tolerancia de cambio",
-			"description": "Diferencia de color (0-255) a partir de la cual un pixel cuenta como \"cambiado\" y entra en el parche. Mas alto = parches mas pequenos (menos objetos) pero movimiento menos fiel. Mas bajo = mas fiel, parches grandes."
+			"description": "Diferencia de color (0-255) a partir de la cual un pixel cuenta como \"cambiado\" y entra en el parche. Mas alto = parches mas pequenos (menos objetos) pero movimiento menos fiel."
 		},
 		"base-multiplier": {
 			"type": "int",
@@ -101,29 +105,13 @@
 			"name": "Presupuesto del fondo (x)",
 			"description": "El fondo estatico usa <cy>objetos por frame x este numero</c> (se traza una sola vez, asi que es barato darle mas detalle)."
 		},
-		"title-render": {
-			"name": "Calidad y resultado",
-			"type": "title"
-		},
-		"quality": {
-			"type": "string",
-			"default": "Rapido",
-			"name": "Calidad de calculo (metodos 7 y 8)",
-			"one-of": [
-				"Rapido",
-				"Normal",
-				"Alto",
-				"Maximo"
-			],
-			"description": "Con muchos frames <cy>Rapido</c> es lo recomendable."
-		},
 		"max-raster": {
 			"type": "int",
 			"default": 384,
 			"min": 64,
 			"max": 1024,
 			"name": "Resolucion interna maxima",
-			"description": "Lado maximo (px) de la imagen de trabajo de cada frame. Mas alto = mas detalle pero mas lento."
+			"description": "Lado maximo (px) de la imagen de trabajo. Mas alto = mas detalle pero mas lento."
 		},
 		"alpha-threshold": {
 			"type": "int",
@@ -133,18 +121,6 @@
 			"name": "Umbral de transparencia",
 			"description": "Los pixeles con alfa menor que esto se consideran transparentes y no generan objetos."
 		},
-		"title-gd": {
-			"name": "Objetos de Geometry Dash",
-			"type": "title"
-		},
-		"color-channel": {
-			"type": "int",
-			"default": 1010,
-			"min": 1,
-			"max": 1020,
-			"name": "Canal de color",
-			"description": "Canal base de los objetos (1010 = negro). El color se aplica con HSV sobre este canal. <cr>No lo cambies</c> salvo que sepas lo que haces."
-		},
 		"bleed": {
 			"type": "float",
 			"default": 0.15,
@@ -153,43 +129,11 @@
 			"name": "Solape entre rectangulos",
 			"description": "Unidades extra que se ensancha cada rectangulo para evitar lineas finas entre ellos."
 		},
-		"flip-rotation": {
-			"type": "bool",
-			"default": false,
-			"name": "Invertir giro",
-			"description": "Si los rectangulos rotados (metodos 7 y 8) salen girados al reves, activalo."
-		},
 		"select-after": {
 			"type": "bool",
 			"default": true,
 			"name": "Seleccionar al colocar",
 			"description": "Selecciona los objetos importados para poder moverlos de golpe (con muchos objetos puede dar tirones)."
-		},
-		"title-mono": {
-			"name": "Estilos de tinta (metodos 9-17)",
-			"type": "title"
-		},
-		"invert-ink": {
-			"type": "bool",
-			"default": false,
-			"name": "Tinta blanca sobre negro",
-			"description": "Invierte los estilos de tinta: tinta blanca sobre fondo negro."
-		},
-		"black-channel": {
-			"type": "int",
-			"default": 1010,
-			"min": 1,
-			"max": 1020,
-			"name": "Canal negro",
-			"description": "Canal de la tinta negra en los estilos de tinta (1010 = negro)."
-		},
-		"white-channel": {
-			"type": "int",
-			"default": 1011,
-			"min": 1,
-			"max": 1020,
-			"name": "Canal blanco",
-			"description": "Canal del papel blanco en los estilos de tinta (1011 = blanco). Si el papel no sale blanco, cambia este valor."
 		}
 	},
 	"tags": [

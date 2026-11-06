@@ -5,37 +5,29 @@
 #include <string>
 #include <vector>
 
-#include "engine.hpp"
-#include "gdexport.hpp"
-#include "gifanim.hpp"
 #include "gifpatch.hpp"
 
 using namespace geode::prelude;
 
-// Ventana del importador de GIF (430x290):
-//   izquierda: vista previa del frame 0 convertido + estado
-//   derecha: metodo, objetos por frame, lado largo, frames maximos, gris
+// Ventana del importador de GIF (metodo de parches):
+//   izquierda: vista previa del frame 0 + estado
+//   derecha: objetos por frame, lado largo, escala de grises, y botones GIF / Colocar / Ajustes
 class GifPopup : public geode::Popup {
 public:
     static GifPopup* create(EditorUI* editor);
     ~GifPopup();
 
 protected:
-    // Calculo del frame 0 (vista previa) en un hilo aparte
+    // Fondo + parche 0 (vista previa) en un hilo aparte
     struct PreviewJob {
         gdx::Progress prog;
         std::shared_ptr<const gdx::GifData> gif;
-        int frameIdx = 0;
-        gdx::Method method = gdx::Method::BSP;
-        gdx::Options opt;
-        int id = 0;
-        gdx::Result result;
-        // metodo "Estatico + parches"
-        bool patch = false;
         gdx::GifPlan plan;
-        gdx::Method tracer = gdx::Method::BSP;
-        int tolerance = 28, baseBudget = 1;
+        gdx::Options opt;
+        gdx::PatchParams pp;
+        int id = 0;
         gdx::PatchSet patchSet;
+        gdx::Result result;               // fondo + parche 0 combinados
         std::atomic<bool> done{false};
     };
     // Conversion de todos los frames (al pulsar Colocar)
@@ -43,14 +35,8 @@ protected:
         gdx::Progress prog;
         std::shared_ptr<const gdx::GifData> gif;
         gdx::GifPlan plan;
-        gdx::Method method = gdx::Method::BSP;
         gdx::Options opt;
-        int threads = 2;
-        std::vector<gdx::Result> results;
-        // metodo "Estatico + parches"
-        bool patch = false;
-        gdx::Method tracer = gdx::Method::BSP;
-        int tolerance = 28, baseBudget = 1;
+        gdx::PatchParams pp;
         gdx::PatchSet patchSet;
         std::atomic<bool> done{false};
     };
@@ -61,14 +47,10 @@ protected:
     void onPlace(CCObject*);
     void onInfo(CCObject*);
     void onSettings(CCObject*);
-    void onPrev(CCObject*) { stepMethod(-1); }
-    void onNext(CCObject*) { stepMethod(+1); }
     void onPerFrameSlider(CCObject* sender);
     void onSizeSlider(CCObject* sender);
-    void onFramesSlider(CCObject* sender);
     void onGray(CCObject*);
 
-    void stepMethod(int dir);
     void refreshLabels();
     void loadGifBytes(std::vector<uint8_t> const& bytes);
     void scheduleRecompute();
@@ -79,16 +61,13 @@ protected:
     void buildPreview();
     void setStatus(std::string const& a, std::string const& b = "", std::string const& note = "");
 
-    gdx::Method method() const { return gdx::Method(std::min(m_method, int(gdx::Method::Ascii) - 1)); }
-    bool isPatch() const { return m_method == int(gdx::Method::Ascii); }      // metodo 18: Estatico + parches
-    gdx::Method tracer() const;                                               // trazador que usa el metodo 18
-    int patchTolerance() const;
-    int patchBaseBudget() const;
     gdx::Options makeOptions(int perFrame) const;
+    gdx::PatchParams makePatchParams(int baseBudget) const;
     gdx::GdExportOptions makeExportOptions() const;
     gdx::GifPlan makePlan() const;
-    int effectivePerFrame(int frames) const;
     int maxTotal() const;
+    int baseBudget() const;
+    int patchBudget(int frames) const;
     CCPoint placementOrigin() const;
     int maxUsedGroup() const;
 
@@ -97,25 +76,18 @@ protected:
     std::shared_ptr<PreviewJob> m_job;
     std::shared_ptr<BuildJob> m_build;
     int m_jobCounter = 0;
-    gdx::Result m_result;                 // frame 0 convertido (vista previa)
+    gdx::PatchSet m_patchSet;             // fondo + parche 0 (vista previa)
+    gdx::Result m_result;                 // fondo + parche 0 combinados
     bool m_hasResult = false;
-    gdx::PatchSet m_patchSet;             // fondo + parche 0 (solo metodo 18)
-    bool m_patchResult = false;           // el resultado actual es de tipo parches
 
-    int m_method = 2;                     // 0..16 (BSP por defecto)
-    int m_perFrame = 300;                 // objetos por frame
+    int m_perFrame = 300;                 // objetos por frame (limite de cada parche)
     int m_sizeU = 600;                    // lado largo, unidades GD
-    int m_maxFrames = 40;                 // frames maximos a usar
     bool m_gray = false;
 
-    CCLabelBMFont* m_methodLabel = nullptr;
-    CCLabelBMFont* m_descLabel = nullptr;
     CCLabelBMFont* m_perFrameValue = nullptr;
     CCLabelBMFont* m_sizeValue = nullptr;
-    CCLabelBMFont* m_framesValue = nullptr;
     Slider* m_perFrameSlider = nullptr;
     Slider* m_sizeSlider = nullptr;
-    Slider* m_framesSlider = nullptr;
     CCMenuItemToggler* m_chkGray = nullptr;
     CCLabelBMFont* m_statA = nullptr;
     CCLabelBMFont* m_statB = nullptr;

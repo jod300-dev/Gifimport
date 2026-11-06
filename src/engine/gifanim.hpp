@@ -1,22 +1,21 @@
 // ============================================================================
-//  gdx :: GIF animado -> objetos de GD + Alpha triggers + Spawn triggers (bucle infinito)
+//  gdx :: GIF animado -> Alpha triggers + Spawn triggers en bucle infinito
 //  Sin dependencias de Geode (se puede probar en cualquier PC).
 //
 //  Esquema (N frames):
-//    G_i  (i = 0..N-1)  grupo con los objetos del frame i
-//    F_i                grupo con 2 Alpha: mostrar G_i (1) y ocultar G_{i-1} (0)
+//    G_i  (i = 0..N-1)  grupo con los objetos (parche) del frame i
+//    F_i                grupo con Alpha: mostrar G_i (1) y ocultar el frame anterior (0);
+//                       F_0 ademas oculta TODOS los demas frames (resincroniza cada vuelta)
 //    L                  grupo del bucle: Spawn(F_i, retardo t_i) para cada i + Spawn(L, retardo = duracion total)
-//    I                  grupo de inicio: Alpha(G_i, 0) para i >= 1
-//    2 Spawn "de posicion" en x = trigX: uno lanza L (arranca la animacion) y otro lanza I
-//  Total de triggers = 4N + 2.   Grupos necesarios = 2N + 2.
+//    1 Spawn "de posicion" (x = trigX) que lanza L: arranca la animacion
+//  Triggers = 4N.   Grupos = 2N + 1.
 // ============================================================================
 #pragma once
-#include <atomic>
+#include <algorithm>
 #include <cstdint>
 #include <string>
-#include <thread>
 #include <vector>
-#include "engine.hpp"
+#include "core.hpp"
 #include "gdexport.hpp"
 #ifndef STBI_NO_STDIO
 #define STBI_NO_STDIO
@@ -91,9 +90,8 @@ inline GifPlan planFrames(const GifData& g, int maxFrames, double speed, double 
     return p;
 }
 
-constexpr int kGifTriggersPerFrame = 4;
-inline int gifTriggerCount(int frames) { return kGifTriggersPerFrame * frames + 2; }
-inline int gifGroupCount(int frames) { return 2 * frames + 2; }
+inline int gifTriggerCount(int frames) { return 4 * frames; }
+inline int gifGroupCount(int frames) { return 2 * frames + 1; }
 
 // Objetos por frame que caben respetando el tope total (triggers incluidos).
 inline int gifPerFrameBudget(int requested, int frames, int maxTotal) {
@@ -101,42 +99,12 @@ inline int gifPerFrameBudget(int requested, int frames, int maxTotal) {
     return std::clamp(std::min(requested, room), 1, 80000);
 }
 
-// ------------------------------------------------------------ convertir -----
-
-// Convierte los frames del plan en paralelo. Devuelve un Result por frame del plan.
-inline std::vector<Result> convertFrames(const GifData& g, const GifPlan& plan, Method method, const Options& opt,
-                                         Progress* prog, int threads) {
-    const int n = plan.count();
-    std::vector<Result> out;
-    out.resize(size_t(n));
-    std::atomic<int> next{0}, done{0};
-    threads = std::clamp(threads, 1, std::max(1, n));
-    auto worker = [&]() {
-        for (;;) {
-            if (isCancelled(prog)) return;
-            int i = next.fetch_add(1);
-            if (i >= n) return;
-            try {
-                out[size_t(i)] = convert(g.frames[size_t(plan.idx[size_t(i)])], method, opt, nullptr);
-            } catch (...) {
-                out[size_t(i)] = Result{};
-            }
-            report(prog, float(done.fetch_add(1) + 1) / float(n));
-        }
-    };
-    std::vector<std::thread> pool;
-    for (int t = 1; t < threads; ++t) pool.emplace_back(worker);
-    worker();
-    for (auto& t : pool) t.join();
-    return out;
-}
-
 // -------------------------------------------------------- cadena de GD ------
 
 struct GifExportParams {
-    GdExportOptions eo;               // origen, lado largo, canal de color, bleed...
-    int baseGroup = 1;                // primer grupo libre (se usan baseGroup .. baseGroup + 2N + 1)
-    double trigX = -30;               // x de los 2 triggers de arranque
+    GdExportOptions eo;               // origen, lado largo, solape...
+    int baseGroup = 1;                // primer grupo libre (se usan baseGroup .. baseGroup + 2N)
+    double trigX = 0;                 // x del trigger de arranque
     int objectIdAlpha = 1007;
     int objectIdSpawn = 1268;
 };
@@ -148,6 +116,7 @@ inline void addTriggerHead(std::string& s, int id, double x, double y) {
     s += ",3,"; appendNum(s, y, 2);
     s += ",36,1";
 }
+// Alpha "spawn triggered" dentro del grupo ownGroup
 inline void addAlpha(std::string& s, const GifExportParams& p, double x, double y, int target, int opacity, int ownGroup) {
     addTriggerHead(s, p.objectIdAlpha, x, y);
     s += ",51,"; s += std::to_string(target);
@@ -165,41 +134,22 @@ inline void addSpawn(std::string& s, const GifExportParams& p, double x, double 
 }
 } // namespace detail
 
-// results = un Result por frame del plan. Devuelve "" si algo no cuadra (errmsg explica).
-inline std::string buildGifString(const std::vector<Result>& results, const GifPlan& plan,
-                                  const GifExportParams& p, std::string* errmsg = nullptr) {
+// Triggers de la animacion (sin objetos). N = frames del plan; plan.delay[i] = duracion del frame i.
+// x0,y0 = esquina inferior izquierda de la cuadricula donde se colocan los triggers.
+inline std::string buildGifTriggers(const GifPlan& plan, const GifExportParams& p, double x0, double y0,
+                                    double startY, std::string* errmsg = nullptr) {
     auto fail = [&](const char* m) { if (errmsg) *errmsg = m; return std::string(); };
     const int N = plan.count();
-    if (N < 2 || int(results.size()) != N) return fail("Hacen falta al menos 2 frames");
+    if (N < 2) return fail("Hacen falta al menos 2 frames");
     if (p.baseGroup < 1 || p.baseGroup + gifGroupCount(N) - 1 > 9999)
         return fail("No quedan grupos libres suficientes (max. 9999)");
-    const int G0 = p.baseGroup, F0 = G0 + N, L = G0 + 2 * N, I = G0 + 2 * N + 1;
+    const int G0 = p.baseGroup, F0 = G0 + N, L = G0 + 2 * N;
 
     std::string out;
-    size_t total = 0;
-    for (auto& r : results) total += r.shapes.size();
-    if (total == 0) return fail("Ningun frame genero objetos");
-    out.reserve(total * 100 + size_t(gifTriggerCount(N)) * 90);
-
-    // --- objetos de cada frame, cada uno en su grupo G_i
-    for (int i = 0; i < N; ++i) {
-        const Result& r = results[size_t(i)];
-        if (r.shapes.empty()) continue;
-        GdExportOptions eo = p.eo;
-        eo.groupStr = std::to_string(G0 + i);
-        eo.monoFastPath = r.mono && !r.colored;
-        std::string s = toGdString(r, eo);
-        if (s.empty()) continue;
-        out += s; out += ';';
-    }
-
-    // --- triggers: cuadricula encima de la imagen (la posicion no importa para los spawn-triggered)
-    const Result& r0 = results[0];
-    GdSize sz = gdImageSize(r0, p.eo);
-    const double left = p.eo.originX - sz.w * 0.5, top = p.eo.originY + sz.h * 0.5 + 45.0;
+    out.reserve(size_t(gifTriggerCount(N)) * 90);
     const int cols = 30;
     int k = 0;
-    auto pos = [&](double& x, double& y) { x = left + (k % cols) * 30.0; y = top + (k / cols) * 30.0; ++k; };
+    auto pos = [&](double& x, double& y) { x = x0 + (k % cols) * 30.0; y = y0 + (k / cols) * 30.0; ++k; };
     double x, y;
 
     // bucle L: Spawn(F_i, t_i) + Spawn(L, total)
@@ -212,22 +162,26 @@ inline std::string buildGifString(const std::vector<Result>& results, const GifP
     pos(x, y);
     detail::addSpawn(out, p, x, y, L, plan.total, L);
 
-    // F_i: mostrar G_i, ocultar el frame anterior
+    // F_i: mostrar G_i y ocultar el anterior; F_0 oculta ademas todos los demas (resincroniza cada vuelta)
     for (int i = 0; i < N; ++i) {
         pos(x, y); detail::addAlpha(out, p, x, y, G0 + i, 1, F0 + i);
         pos(x, y); detail::addAlpha(out, p, x, y, G0 + (i + N - 1) % N, 0, F0 + i);
     }
-    // I: ocultar los frames 1..N-1 al empezar
-    for (int i = 1; i < N; ++i) {
-        pos(x, y); detail::addAlpha(out, p, x, y, G0 + i, 0, I);
+    for (int i = 1; i < N - 1; ++i) {
+        pos(x, y); detail::addAlpha(out, p, x, y, G0 + i, 0, F0);
     }
-    // arranque (triggers de posicion): lanzan L e I
-    double sx = p.trigX, sy = top + ((k / cols) + 2) * 30.0;
-    detail::addSpawn(out, p, sx, sy, L, 0, 0);
-    detail::addSpawn(out, p, sx, sy + 30.0, I, 0, 0);
+    // arranque (trigger de posicion): lanza L
+    detail::addSpawn(out, p, p.trigX, startY, L, 0, 0);
 
     if (!out.empty() && out.back() == ';') out.pop_back();
     return out;
+}
+
+// Une dos cadenas de objetos con ';'
+inline std::string joinGd(const std::string& a, const std::string& b) {
+    if (a.empty()) return b;
+    if (b.empty()) return a;
+    return a + ";" + b;
 }
 
 } // namespace gdx

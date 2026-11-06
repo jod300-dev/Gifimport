@@ -7,20 +7,11 @@
 #include <thread>
 
 namespace {
-    constexpr float kPopupW = 430.f, kPopupH = 290.f;
+    constexpr float kPopupW = 400.f, kPopupH = 262.f;
     constexpr float kPrevSize = 140.f;
-    constexpr int kMethodCount = int(gdx::Method::Ascii) + 1;      // metodos 1-17 + el 18 (Estatico + parches); el ASCII no sirve para animar
     constexpr int kMinPF = 10, kMaxPF = 5000;                      // objetos por frame
-    constexpr int kMinFrames = 2, kMaxFrames = 300;
     constexpr int kMinSize = 150, kMaxSize = 6000;
 
-    int qualityFromSetting() {
-        auto q = Mod::get()->getSettingValue<std::string>("quality");
-        if (q == "Normal") return 1;
-        if (q == "Alto") return 2;
-        if (q == "Maximo") return 3;
-        return 0;                                                  // Rapido (por defecto: hay muchos frames)
-    }
     // sliders 0..1 <-> valor
     float pfToSlider(int v) { return std::clamp(float(std::log(double(v) / kMinPF) / std::log(double(kMaxPF) / kMinPF)), 0.f, 1.f); }
     int sliderToPf(float s) {
@@ -28,8 +19,6 @@ namespace {
         int step = u < 100 ? 5 : u < 500 ? 10 : u < 2000 ? 50 : 100;
         return std::clamp(int(std::lround(u / step)) * step, kMinPF, kMaxPF);
     }
-    float framesToSlider(int v) { return std::clamp(float(v - kMinFrames) / float(kMaxFrames - kMinFrames), 0.f, 1.f); }
-    int sliderToFrames(float s) { return kMinFrames + int(std::lround(std::clamp(s, 0.f, 1.f) * (kMaxFrames - kMinFrames))); }
     float sizeToSlider(int u) { return std::clamp(float(std::log(double(u) / kMinSize) / std::log(double(kMaxSize) / kMinSize)), 0.f, 1.f); }
     int sliderToSize(float v) {
         double u = kMinSize * std::pow(double(kMaxSize) / kMinSize, std::clamp(v, 0.f, 1.f));
@@ -59,10 +48,8 @@ bool GifPopup::init(EditorUI* editor) {
     this->setTitle("GIF Importer (beta)");
 
     auto* mod = Mod::get();
-    m_method = std::clamp(mod->getSavedValue<int>("method", 2), 0, kMethodCount - 1);
     m_perFrame = std::clamp(mod->getSavedValue<int>("per-frame", 300), kMinPF, kMaxPF);
     m_sizeU = std::clamp(mod->getSavedValue<int>("size-u", 600), kMinSize, kMaxSize);
-    m_maxFrames = std::clamp(mod->getSavedValue<int>("max-frames", 40), kMinFrames, kMaxFrames);
     m_gray = mod->getSavedValue<bool>("gray", false);
 
     auto put = [&](CCNode* n, float x, float y) { m_mainLayer->addChildAtPosition(n, Anchor::TopLeft, ccp(x, -y)); };
@@ -84,60 +71,43 @@ bool GifPopup::init(EditorUI* editor) {
     hint->setOpacity(120);
     hint->setPosition({kPrevSize / 2, kPrevSize / 2});
     m_previewHolder->addChild(hint);
-    put(m_previewHolder, 84.f, 112.f);
+    put(m_previewHolder, 90.f, 108.f);
 
-    m_statA = label("Elige un GIF animado", "chatFont.fnt", 0.85f, 84.f, 194.f);
-    m_statB = label("", "chatFont.fnt", 0.75f, 84.f, 207.f);
-    m_noteLabel = CCLabelBMFont::create("", "chatFont.fnt", 150.f, kCCTextAlignmentCenter);
+    m_statA = label("Elige un GIF animado", "chatFont.fnt", 0.85f, 90.f, 190.f);
+    m_statB = label("", "chatFont.fnt", 0.75f, 90.f, 203.f);
+    m_noteLabel = CCLabelBMFont::create("", "chatFont.fnt", 160.f, kCCTextAlignmentCenter);
     m_noteLabel->setScale(0.6f);
     m_noteLabel->setColor({255, 200, 80});
-    put(m_noteLabel, 84.f, 236.f);
+    put(m_noteLabel, 90.f, 224.f);
 
     // ============ derecha ============
-    auto arrow = [&](bool flip, SEL_MenuHandler cb, float x, float y) {
-        auto spr = CCSprite::createWithSpriteFrameName("GJ_arrow_03_001.png");
-        spr->setScale(0.5f);
-        spr->setFlipX(flip);
-        putBtn(CCMenuItemSpriteExtra::create(spr, this, cb), x, y);
-    };
-    arrow(false, menu_selector(GifPopup::onPrev), 178.f, 52.f);
-    arrow(true,  menu_selector(GifPopup::onNext), 406.f, 52.f);
-    m_methodLabel = label("", "bigFont.fnt", 0.5f, 292.f, 52.f);
-    m_descLabel = CCLabelBMFont::create("", "chatFont.fnt", 380.f, kCCTextAlignmentCenter);
-    m_descLabel->setScale(0.66f);
-    put(m_descLabel, 292.f, 80.f);
+    label("Metodo: estatico + parches", "bigFont.fnt", 0.36f, 290.f, 50.f);
 
-    label("Objetos por frame", "bigFont.fnt", 0.34f, 168.f, 108.f, 0.f);
-    m_perFrameValue = label("", "bigFont.fnt", 0.34f, 418.f, 108.f, 1.f);
+    label("Objetos por frame", "bigFont.fnt", 0.34f, 180.f, 82.f, 0.f);
+    m_perFrameValue = label("", "bigFont.fnt", 0.34f, 386.f, 82.f, 1.f);
     m_perFrameSlider = Slider::create(this, menu_selector(GifPopup::onPerFrameSlider), 0.78f);
     m_perFrameSlider->setValue(pfToSlider(m_perFrame));
-    put(m_perFrameSlider, 292.f, 124.f);
+    put(m_perFrameSlider, 290.f, 98.f);
 
-    label("Lado largo", "bigFont.fnt", 0.34f, 168.f, 146.f, 0.f);
-    m_sizeValue = label("", "bigFont.fnt", 0.34f, 418.f, 146.f, 1.f);
+    label("Lado largo", "bigFont.fnt", 0.34f, 180.f, 124.f, 0.f);
+    m_sizeValue = label("", "bigFont.fnt", 0.34f, 386.f, 124.f, 1.f);
     m_sizeSlider = Slider::create(this, menu_selector(GifPopup::onSizeSlider), 0.78f);
     m_sizeSlider->setValue(sizeToSlider(m_sizeU));
-    put(m_sizeSlider, 292.f, 162.f);
+    put(m_sizeSlider, 290.f, 140.f);
 
-    label("Frames maximos", "bigFont.fnt", 0.34f, 168.f, 184.f, 0.f);
-    m_framesValue = label("", "bigFont.fnt", 0.34f, 418.f, 184.f, 1.f);
-    m_framesSlider = Slider::create(this, menu_selector(GifPopup::onFramesSlider), 0.78f);
-    m_framesSlider->setValue(framesToSlider(m_maxFrames));
-    put(m_framesSlider, 292.f, 200.f);
-
-    m_chkGray = CCMenuItemToggler::createWithStandardSprites(this, menu_selector(GifPopup::onGray), 0.5f);
+    m_chkGray = CCMenuItemToggler::createWithStandardSprites(this, menu_selector(GifPopup::onGray), 0.55f);
     m_chkGray->toggle(m_gray);
-    putBtn(m_chkGray, 174.f, 224.f);
-    label("Escala de grises", "bigFont.fnt", 0.28f, 186.f, 224.f, 0.f);
+    putBtn(m_chkGray, 192.f, 172.f);
+    label("Escala de grises", "bigFont.fnt", 0.3f, 208.f, 172.f, 0.f);
 
     auto pickBtn = CCMenuItemSpriteExtra::create(ButtonSprite::create("GIF", "bigFont.fnt", "GJ_button_01.png", 0.6f), this, menu_selector(GifPopup::onPick));
-    putBtn(pickBtn, 226.f, 258.f);
+    putBtn(pickBtn, 230.f, 212.f);
     auto placeBtn = CCMenuItemSpriteExtra::create(ButtonSprite::create("Colocar", "bigFont.fnt", "GJ_button_02.png", 0.6f), this, menu_selector(GifPopup::onPlace));
-    putBtn(placeBtn, 332.f, 258.f);
+    putBtn(placeBtn, 322.f, 212.f);
     auto infoBtn = CCMenuItemSpriteExtra::create(CCSprite::createWithSpriteFrameName("GJ_infoIcon_001.png"), this, menu_selector(GifPopup::onInfo));
-    putBtn(infoBtn, 414.f, 258.f);
-    auto setBtn = CCMenuItemSpriteExtra::create(ButtonSprite::create("Ajustes", "bigFont.fnt", "GJ_button_04.png", 0.4f), this, menu_selector(GifPopup::onSettings));
-    putBtn(setBtn, 40.f, 270.f);
+    putBtn(infoBtn, 380.f, 212.f);
+    auto setBtn = CCMenuItemSpriteExtra::create(ButtonSprite::create("Ajustes", "bigFont.fnt", "GJ_button_04.png", 0.5f), this, menu_selector(GifPopup::onSettings));
+    putBtn(setBtn, 290.f, 245.f);
 
     this->schedule(schedule_selector(GifPopup::tick), 0.1f);
     this->refreshLabels();
@@ -147,45 +117,24 @@ bool GifPopup::init(EditorUI* editor) {
 // ------------------------------------------------------------- etiquetas ---
 
 void GifPopup::refreshLabels() {
-    if (isPatch()) {
-        m_methodLabel->setString("18. Estatico + parches");
-        m_descLabel->setString("Traza lo quieto UNA vez y solo parches con lo que cambia en cada frame. Menos objetos y sin parpadeo.");
-    } else {
-        auto const& info = gdx::methodInfo(method());
-        m_methodLabel->setString(info.name);
-        m_descLabel->setString(info.desc);
-    }
-    m_methodLabel->limitLabelWidth(210.f, 0.5f, 0.2f);
-
     char buf[64];
     std::snprintf(buf, sizeof buf, "%d", m_perFrame);
     m_perFrameValue->setString(buf);
     std::snprintf(buf, sizeof buf, "%d u (%.1f bloques)", m_sizeU, m_sizeU / 30.0);
     m_sizeValue->setString(buf);
-    if (m_gif && int(m_gif->frames.size()) < m_maxFrames) std::snprintf(buf, sizeof buf, "%d (el GIF tiene %d)", m_maxFrames, int(m_gif->frames.size()));
-    else std::snprintf(buf, sizeof buf, "%d", m_maxFrames);
-    m_framesValue->setString(buf);
 
     auto* mod = Mod::get();
-    mod->setSavedValue<int>("method", m_method);
     mod->setSavedValue<int>("per-frame", m_perFrame);
     mod->setSavedValue<int>("size-u", m_sizeU);
-    mod->setSavedValue<int>("max-frames", m_maxFrames);
     mod->setSavedValue<bool>("gray", m_gray);
 }
 
 void GifPopup::setStatus(std::string const& a, std::string const& b, std::string const& note) {
     m_statA->setString(a.c_str());
-    m_statA->limitLabelWidth(150.f, 0.85f, 0.4f);
+    m_statA->limitLabelWidth(160.f, 0.85f, 0.4f);
     m_statB->setString(b.c_str());
-    m_statB->limitLabelWidth(150.f, 0.75f, 0.4f);
+    m_statB->limitLabelWidth(160.f, 0.75f, 0.4f);
     m_noteLabel->setString(note.c_str());
-}
-
-void GifPopup::stepMethod(int dir) {
-    m_method = (m_method + dir + kMethodCount) % kMethodCount;
-    this->refreshLabels();
-    this->scheduleRecompute();
 }
 
 void GifPopup::onPerFrameSlider(CCObject* sender) {
@@ -199,12 +148,6 @@ void GifPopup::onPerFrameSlider(CCObject* sender) {
 void GifPopup::onSizeSlider(CCObject* sender) {
     m_sizeU = sliderToSize(static_cast<SliderThumb*>(sender)->getValue());
     this->refreshLabels();                      // solo afecta a la colocacion
-}
-
-void GifPopup::onFramesSlider(CCObject* sender) {
-    m_maxFrames = sliderToFrames(static_cast<SliderThumb*>(sender)->getValue());
-    this->refreshLabels();                      // no cambia el frame 0: solo el reparto al colocar
-    if (m_hasResult && !m_build) this->applyPreview(nullptr);   // refresca el texto de estado
 }
 
 void GifPopup::onGray(CCObject*) {
@@ -270,61 +213,49 @@ gdx::Options GifPopup::makeOptions(int perFrame) const {
     o.budget = std::max(1, perFrame);
     o.maxRaster = std::clamp(mod->getSettingValue<int>("max-raster"), 64, 1024);
     o.alphaThreshold = std::clamp(mod->getSettingValue<int>("alpha-threshold"), 1, 255);
-    o.quality = qualityFromSetting();
-    o.invertInk = mod->getSettingValue<bool>("invert-ink");
-    // Sin canales libres: color por HSV sobre el canal base, y los estilos de tinta usan los canales 1010/1011.
-    o.colorChannels = false;
-    o.mainChannels = false;
-    o.lightSpecialChannels = true;
     o.grayscale = m_gray;
-    o.maxChannels = 0;
     return o;
+}
+
+gdx::PatchParams GifPopup::makePatchParams(int baseBudgetValue) const {
+    auto* mod = Mod::get();
+    gdx::PatchParams pp;
+    pp.tolerance = std::clamp(mod->getSettingValue<int>("patch-tolerance"), 4, 120);
+    pp.baseBudget = baseBudgetValue;
+    unsigned hw = std::max(1u, std::thread::hardware_concurrency());
+    pp.threads = int(std::clamp<unsigned>(unsigned(std::max(1, mod->getSettingValue<int>("threads"))), 1u, hw));
+    return pp;
 }
 
 gdx::GdExportOptions GifPopup::makeExportOptions() const {
     auto* mod = Mod::get();
     gdx::GdExportOptions eo;
     eo.longSide = m_sizeU;
-    eo.colorChannel = std::clamp(mod->getSettingValue<int>("color-channel"), 1, 1020);
     eo.bleed = std::clamp(mod->getSettingValue<double>("bleed"), 0.0, 2.0);
-    eo.flipRotation = mod->getSettingValue<bool>("flip-rotation");
-    eo.blackChannel = std::clamp(mod->getSettingValue<int>("black-channel"), 1, 1020);
-    eo.whiteChannel = std::clamp(mod->getSettingValue<int>("white-channel"), 1, 1020);
     return eo;
-}
-
-gdx::Method GifPopup::tracer() const {
-    auto t = Mod::get()->getSettingValue<std::string>("patch-tracer");
-    if (t == "Quadtree") return gdx::Method::Quadtree;
-    if (t == "Regiones") return gdx::Method::Regions;
-    if (t == "Cuadricula") return gdx::Method::UniformGrid;
-    return gdx::Method::BSP;                                   // por defecto
-}
-
-int GifPopup::patchTolerance() const {
-    return std::clamp(Mod::get()->getSettingValue<int>("patch-tolerance"), 4, 120);
-}
-
-// Presupuesto del fondo estatico = limite por frame x multiplicador (como los "rests" del GIF to GD)
-int GifPopup::patchBaseBudget() const {
-    int mult = std::clamp(Mod::get()->getSettingValue<int>("base-multiplier"), 1, 20);
-    return gdx::patchBaseBudget(m_perFrame, mult, maxTotal());
 }
 
 int GifPopup::maxTotal() const {
     return std::clamp(Mod::get()->getSettingValue<int>("max-total-objects"), 2000, 150000);
 }
 
+// Presupuesto del fondo estatico = limite por frame x multiplicador (ajustes)
+int GifPopup::baseBudget() const {
+    int mult = std::clamp(Mod::get()->getSettingValue<int>("base-multiplier"), 1, 20);
+    return gdx::patchBaseBudget(m_perFrame, mult, maxTotal());
+}
+
+// Objetos por parche realmente usados: el pedido, recortado para no pasar del tope total.
+int GifPopup::patchBudget(int frames) const {
+    return gdx::patchPerFrameBudget(m_perFrame, frames, maxTotal(), baseBudget());
+}
+
 gdx::GifPlan GifPopup::makePlan() const {
     auto* mod = Mod::get();
     double speed = std::clamp(mod->getSettingValue<double>("speed"), 0.1, 10.0);
     double minDelay = std::clamp(mod->getSettingValue<double>("min-delay"), 0.01, 0.5);
-    return gdx::planFrames(*m_gif, m_maxFrames, speed, minDelay);
-}
-
-// Objetos por frame realmente usados: el pedido, recortado para no pasar del tope total.
-int GifPopup::effectivePerFrame(int frames) const {
-    return gdx::gifPerFrameBudget(m_perFrame, frames, maxTotal());
+    int maxFrames = std::clamp(mod->getSettingValue<int>("max-frames"), 2, 300);
+    return gdx::planFrames(*m_gif, maxFrames, speed, minDelay);
 }
 
 void GifPopup::scheduleRecompute() {
@@ -337,37 +268,23 @@ void GifPopup::recompute(float) {
     if (!m_gif || m_build) return;
     if (m_job) m_job->prog.cancel.store(true);
 
-    gdx::GifPlan plan = makePlan();
     auto job = std::make_shared<PreviewJob>();
     job->id = ++m_jobCounter;
     job->gif = m_gif;
-    job->frameIdx = plan.idx.empty() ? 0 : plan.idx[0];
-    job->method = method();
-    if (isPatch()) {
-        int baseB = patchBaseBudget();
-        job->patch = true;
-        job->plan = plan;
-        job->tracer = tracer();
-        job->tolerance = patchTolerance();
-        job->baseBudget = baseB;
-        job->opt = makeOptions(gdx::patchPerFrameBudget(m_perFrame, plan.count(), maxTotal(), baseB));
-    } else {
-        job->opt = makeOptions(effectivePerFrame(plan.count()));
-    }
+    job->plan = makePlan();
+    job->opt = makeOptions(patchBudget(job->plan.count()));
+    job->pp = makePatchParams(baseBudget());
+    job->pp.threads = 1;
+    job->pp.maxPatches = 1;                                      // solo fondo + parche 0 (rapido)
     m_job = job;
     this->setStatus("Calculando vista previa...");
 
     std::thread([job]() {
         try {
-            if (job->patch) {
-                // solo fondo + parche 0 (rapido)
-                job->patchSet = gdx::convertPatches(*job->gif, job->plan, job->tracer, job->opt, job->tolerance,
-                                                    job->baseBudget, &job->prog, 1, 1);
-                job->result = gdx::combineForPreview(job->patchSet);
-            } else {
-                job->result = gdx::convert(job->gif->frames[size_t(job->frameIdx)], job->method, job->opt, &job->prog);
-            }
+            job->patchSet = gdx::convertPatches(*job->gif, job->plan, job->opt, job->pp, &job->prog);
+            job->result = gdx::combineForPreview(job->patchSet);
         } catch (...) {
+            job->patchSet = gdx::PatchSet{};
             job->result = gdx::Result{};
             job->result.note = "Error interno al calcular";
         }
@@ -400,9 +317,8 @@ void GifPopup::tick(float) {
 
 void GifPopup::applyPreview(std::shared_ptr<PreviewJob> job) {
     if (job) {
+        m_patchSet = std::move(job->patchSet);
         m_result = std::move(job->result);
-        m_patchResult = job->patch;
-        if (job->patch) m_patchSet = std::move(job->patchSet);
         m_hasResult = !m_result.shapes.empty();
         if (!m_hasResult) {
             this->setStatus("No se genero ningun objeto", "", m_result.note);
@@ -410,33 +326,22 @@ void GifPopup::applyPreview(std::shared_ptr<PreviewJob> job) {
         }
         this->buildPreview();
     }
-    if (!m_hasResult || !m_gif) return;
+    if (!m_hasResult || !m_gif || m_patchSet.patches.empty()) return;
 
-    // estimacion del resultado completo
+    // estimacion del resultado completo: fondo (una vez) + n parches parecidos al parche 0
     gdx::GifPlan plan = makePlan();
     int n = plan.count();
+    auto eo = makeExportOptions();
+    size_t baseObjs = m_patchSet.base.shapes.size(), p0 = m_patchSet.patches[0].shapes.size();
+    size_t baseKb = gdx::toGdString(m_patchSet.base, eo).size() / 1024;
+    size_t p0Kb = gdx::toGdString(m_patchSet.patches[0], eo).size() / 1024;
+    size_t totalObjs = baseObjs + p0 * size_t(n) + size_t(gdx::gifTriggerCount(n));
     char a1[96], b1[96];
-    std::string note = m_result.note;
-    if (m_patchResult && !m_patchSet.patches.empty()) {
-        // fondo (una vez) + n parches parecidos al parche 0
-        auto eo = makeExportOptions();
-        size_t baseObjs = m_patchSet.base.shapes.size(), p0 = m_patchSet.patches[0].shapes.size();
-        size_t baseKb = gdx::toGdString(m_patchSet.base, eo).size() / 1024;
-        size_t p0Kb = gdx::toGdString(m_patchSet.patches[0], eo).size() / 1024;
-        size_t totalObjs = baseObjs + p0 * size_t(n) + size_t(gdx::gifTriggerCount(n));
-        std::snprintf(a1, sizeof a1, "%d frames | ~%zu objetos", n, totalObjs);
-        std::snprintf(b1, sizeof b1, "~%zu KB | %.1f s de bucle", baseKb + p0Kb * size_t(n) + size_t(n) * 2, plan.total);
-        int pct = m_patchSet.totalPixels ? int(m_patchSet.patchPixels0 * 100 / m_patchSet.totalPixels) : 0;
-        note = "Fondo: " + std::to_string(baseObjs) + " obj. Cambia ~" + std::to_string(pct) + "% por frame. " + note;
-    } else {
-        int pf = effectivePerFrame(n);
-        size_t kb0 = gdx::toGdString(m_result, makeExportOptions()).size() / 1024;
-        size_t objs0 = m_result.shapes.size();
-        size_t totalObjs = objs0 * size_t(n) + size_t(gdx::gifTriggerCount(n));
-        std::snprintf(a1, sizeof a1, "%d frames | ~%zu objetos", n, totalObjs);
-        std::snprintf(b1, sizeof b1, "~%zu KB | %.1f s de bucle", kb0 * size_t(n) + size_t(n) * 2, plan.total);
-        if (pf < m_perFrame) note = "Limitado a " + std::to_string(pf) + " obj/frame por el tope total. " + note;
-    }
+    std::snprintf(a1, sizeof a1, "%d frames | ~%zu objetos", n, totalObjs);
+    std::snprintf(b1, sizeof b1, "~%zu KB | %.1f s de bucle", baseKb + p0Kb * size_t(n) + size_t(n) * 2, plan.total);
+    int pct = m_patchSet.totalPixels ? int(m_patchSet.patchPixels0 * 100 / m_patchSet.totalPixels) : 0;
+    std::string note = "Fondo: " + std::to_string(baseObjs) + " obj. Cambia ~" + std::to_string(pct) + "% por frame.";
+    if (patchBudget(n) < m_perFrame) note += " Limitado a " + std::to_string(patchBudget(n)) + " obj/frame por el tope total.";
     this->setStatus(a1, b1, note);
 }
 
@@ -444,8 +349,7 @@ void GifPopup::buildPreview() {
     if (m_preview) { m_preview->removeFromParent(); m_preview = nullptr; }
     int w = m_result.rasterW, h = m_result.rasterH;
     if (w <= 0 || h <= 0) return;
-    int k = m_result.mono ? std::clamp(300 / std::max(w, h), 1, 3) : 1;
-    gdx::Image img = gdx::renderShapesScaled(m_result.shapes, w, h, k);
+    gdx::Image img = gdx::renderShapes(m_result.shapes, w, h);
     w = img.w; h = img.h;
     std::vector<uint8_t> buf(size_t(w) * h * 4);
     for (size_t i = 0; i < size_t(w) * h; ++i) {                    // composita sobre gris oscuro
@@ -536,33 +440,16 @@ void GifPopup::onPlace(CCObject*) {
     auto job = std::make_shared<BuildJob>();
     job->gif = m_gif;
     job->plan = makePlan();
-    job->method = method();
-    if (isPatch()) {
-        int baseB = patchBaseBudget();
-        job->patch = true;
-        job->tracer = tracer();
-        job->tolerance = patchTolerance();
-        job->baseBudget = baseB;
-        job->opt = makeOptions(gdx::patchPerFrameBudget(m_perFrame, job->plan.count(), maxTotal(), baseB));
-    } else {
-        job->opt = makeOptions(effectivePerFrame(job->plan.count()));
-    }
-    unsigned hw = std::max(1u, std::thread::hardware_concurrency());
-    job->threads = int(std::clamp<unsigned>(unsigned(std::max(1, Mod::get()->getSettingValue<int>("threads"))), 1u, hw));
+    job->opt = makeOptions(patchBudget(job->plan.count()));
+    job->pp = makePatchParams(baseBudget());
     m_build = job;
     this->unschedule(schedule_selector(GifPopup::recompute));
     this->setStatus("Convirtiendo frames... 0%", "No cierres la ventana");
 
     std::thread([job]() {
         try {
-            if (job->patch) {
-                job->patchSet = gdx::convertPatches(*job->gif, job->plan, job->tracer, job->opt, job->tolerance,
-                                                    job->baseBudget, &job->prog, job->threads);
-            } else {
-                job->results = gdx::convertFrames(*job->gif, job->plan, job->method, job->opt, &job->prog, job->threads);
-            }
+            job->patchSet = gdx::convertPatches(*job->gif, job->plan, job->opt, job->pp, &job->prog);
         } catch (...) {
-            job->results.clear();
             job->patchSet = gdx::PatchSet{};
         }
         job->done.store(true, std::memory_order_release);
@@ -582,48 +469,44 @@ void GifPopup::finishBuild(std::shared_ptr<BuildJob> job) {
     const int N = job->plan.count();
     p.baseGroup = std::max(this->maxUsedGroup() + 1, std::clamp(mod->getSettingValue<int>("first-group"), 1, 9000));
     if (mod->getSettingValue<bool>("triggers-at-start")) {
-        p.trigX = -30.0;
+        p.trigX = double(mod->getSettingValue<int>("trigger-x"));
     } else {
-        const gdx::Result* r0 = job->patch ? (job->patchSet.patches.empty() ? nullptr : &job->patchSet.patches[0])
-                                           : (job->results.empty() ? nullptr : &job->results[0]);
-        if (r0) p.trigX = origin.x - gdx::gdImageSize(*r0, p.eo).w * 0.5 - 30.0;
+        p.trigX = std::max(0.0, origin.x - gdx::gdImageSize(job->patchSet.base, p.eo).w * 0.5 - 30.0);
     }
 
     std::string err;
-    std::string str = job->patch ? gdx::buildGifPatchString(job->patchSet, job->plan, p, &err)
-                                 : gdx::buildGifString(job->results, job->plan, p, &err);
+    std::string str = gdx::buildGifPatchString(job->patchSet, job->plan, p, &err);
     if (str.empty()) {
         FLAlertLayer::create("GIF Importer", err.empty() ? "No se pudo generar el GIF." : err.c_str(), "OK")->show();
         this->applyPreview(nullptr);
         return;
     }
 
-    size_t shapes = job->patch ? job->patchSet.base.shapes.size() : 0;
-    for (auto& r : (job->patch ? job->patchSet.patches : job->results)) shapes += r.shapes.size();
+    size_t shapes = job->patchSet.base.shapes.size();
+    for (auto& r : job->patchSet.patches) shapes += r.shapes.size();
     size_t count = shapes + size_t(gdx::gifTriggerCount(N));
     CCArray* created = lel->createObjectsFromString(str.c_str(), true, true);
     if (created && created->count() > 0 && mod->getSettingValue<bool>("select-after") && m_editor) {
         m_editor->selectObjects(created, true);
     }
 
-    char msg[128];
-    std::snprintf(msg, sizeof msg, "GIF colocado: %d frames, %zu objetos, grupos %d-%d",
-                  N, count, p.baseGroup, p.baseGroup + gdx::gifGroupCount(N) - 1);
-    Notification::create(msg, NotificationIcon::Success, 3.5f)->show();
+    char msg[160];
+    std::snprintf(msg, sizeof msg, "GIF colocado: %d frames, %zu objetos, grupos %d-%d, arranque en x=%d",
+                  N, count, p.baseGroup, p.baseGroup + gdx::gifGroupCount(N) - 1, int(p.trigX));
+    Notification::create(msg, NotificationIcon::Success, 4.f)->show();
     this->onClose(nullptr);
 }
 
 void GifPopup::onInfo(CCObject*) {
     FLAlertLayer::create(
         "GIF Importer (beta)",
-        "Cada frame del GIF se convierte en objetos con el <cy>metodo</c> elegido y va en su propio <cy>grupo</c>.\n"
-        "Se crean <cy>Alpha triggers</c> (mostrar este frame, ocultar el anterior) y <cy>Spawn triggers</c> con el retardo real del GIF; "
+        "<cg>Metodo: estatico + parches.</c> Lo que no cambia en el GIF se traza <cy>una sola vez</c> (fondo) y cada frame solo lleva "
+        "un <cy>parche</c> con lo que cambia.\n"
+        "Se crean <cy>Alpha triggers</c> (mostrar este parche, ocultar el anterior) y <cy>Spawn triggers</c> con el retardo real del GIF; "
         "un Spawn final se llama a si mismo y la animacion se repite <cg>para siempre</c>.\n"
-        "- <cg>Objetos por frame</c>: presupuesto de cada frame (se recorta si pasas del tope total de los ajustes).\n"
-        "- <cg>Metodo 18 (Estatico + parches)</c>: traza lo que no cambia <cy>una sola vez</c> y por frame solo un parche con lo que cambia. Menos objetos y sin parpadeo. Ajustes: trazador, tolerancia y presupuesto del fondo.\n"
-        "- <cg>Frames maximos</c>: si el GIF tiene mas, se reparten de forma uniforme y se conserva la duracion.\n"
-        "- En el editor los frames se ven superpuestos: <cy>dale a jugar</c> para ver la animacion.\n"
-        "- Los triggers de arranque van en x=-30 (inicio del nivel); cambialo en Ajustes.\n"
+        "- <cg>Objetos por frame</c>: limite de cada parche (el fondo usa ese limite x el multiplicador de Ajustes).\n"
+        "- En el editor los frames se ven superpuestos: <cy>juega el nivel desde el inicio</c> (sin Start Pos) para ver la animacion.\n"
+        "- El trigger de arranque va en x=0 por defecto; cambialo en Ajustes (Trigger de arranque: x).\n"
         "No se puede deshacer: <cr>guarda antes</c>.",
         "OK"
     )->show();

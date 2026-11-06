@@ -35,57 +35,11 @@ struct Shape {
     int16_t z = 0;                       // capa: mayor = se dibuja encima
 };
 
-enum class Method : int {
-    UniformGrid = 0,  // 1. Cuadrícula uniforme
-    Quadtree,         // 2. Quadtree adaptativo (mejor-primero)
-    BSP,              // 3. Particiones binarias adaptativas (k-d)
-    Pyramid,          // 4. Pirámide de capas (residuos dispersos)
-    Regions,          // 5. Regiones por paleta + rectángulos voraces
-    Runs,             // 6. Franjas horizontales con tolerancia
-    Geometrize,       // 7. Rectángulos rotados por búsqueda aleatoria
-    Hybrid,           // 8. Híbrido: BSP + refinado con rectángulos rotados
-    // ---- estilos monocromos (sin HSV, pocos objetos) ----
-    Halftone,         // 9.  Trama de diamantes (halftone)
-    Engrave,          // 10. Grabado de líneas de grosor variable
-    Hatch,            // 11. Sombreado cruzado (cross-hatch)
-    Stipple,          // 12. Estarcido / puntillismo
-    Dither,           // 13. Tramado Bayer + rectángulos fusionados
-    Ink,              // 14. Tinta (umbral adaptativo)
-    Strokes,          // 15. Boceto de trazos sobre los bordes
-    Spiral,           // 16. Espiral de grosor variable
-    Truchet,          // 17. Diagonales tipo "10 PRINT"
-    Ascii,            // 18. Arte ASCII con objetos de texto (1 objeto por fila)
-    COUNT
-};
-
 struct Options {
-    int budget = 10000;                  // máximo de objetos (duro)
-    int maxRaster = 768;                 // lado máximo del raster interno
-    int alphaThreshold = 128;            // alfa >= umbral => píxel opaco
-    int quality = 2;                     // 0 rápido, 1 normal, 2 alto, 3 máximo
-    float hybridFraction = -1.f;         // fracción del presupuesto para la base BSP del híbrido (<0 = automática)
-    uint32_t seed = 1337;
-    bool invertInk = false;              // estilos monocromos: tinta blanca sobre fondo negro
-    float asciiAspect = 1.0f;            // ASCII: alto/ancho de una celda de carácter (según la fuente)
-    // ---- estilos ligeros (9-18) ----
-    bool colorChannels = false;          // true: colores de la imagen (base de color + tinta del mismo tono) en canales
-    int paletteSize = 48;                // canales de color del estilo ligero (se reparten en pares base/tinta)
-    bool lightSpecialChannels = false;   // blanco y negro: usar los canales especiales 1010/1011 en vez de canales libres
-    int asciiChunk = 60;                 // caracteres máximos por objeto de texto (las filas largas se parten)
-    // ---- métodos principales (1-8) ----
-    bool mainChannels = false;           // colores en canales (sin HSV)
-    bool grayscale = false;              // escala de grises (con HSV o con canales según mainChannels)
-    int mainPaletteSize = 64;            // canales de la paleta de los métodos principales
-    // ---- canales disponibles ----
-    int maxChannels = 997;               // canales libres que puede usar este resultado (el 1 nunca; lo fija la ventana)
-};
-
-// Una fila de arte ASCII: se exporta como UN objeto de texto de GD.
-struct TextRow {
-    float cx = 0, cy = 0;                // centro del texto (unidades del raster = celdas)
-    std::string text;
-    bool colored = false;                // true: usa el color (r,g,b) en un canal de la paleta
-    uint8_t r = 0, g = 0, b = 0;
+    int budget = 300;                    // maximo de objetos por parche (duro)
+    int maxRaster = 384;                 // lado maximo del raster interno
+    int alphaThreshold = 128;            // alfa >= umbral => pixel opaco
+    bool grayscale = false;              // escala de grises
 };
 
 struct Progress {
@@ -95,44 +49,14 @@ struct Progress {
 
 struct Result {
     std::vector<Shape> shapes;
-    int rasterW = 0, rasterH = 0;        // tamaño del raster al que se refieren las formas
+    int rasterW = 0, rasterH = 0;        // tamano del raster al que se refieren las formas
     float aspect = 1.f;                  // ancho/alto de la imagen original
-    double psnr = 0;                     // calidad aproximada (dB, RGB)
-    double ms = 0;                       // tiempo de cálculo
-    bool cancelled = false;
     bool hadAlpha = false;
-    bool mono = false;                   // solo tinta/papel (negro y blanco), sin HSV
-    uint8_t inkValue = 0;                // 0 = tinta negra, 255 = tinta blanca
-    bool colored = false;                // el resultado usa canales de color (cada color distinto = un canal, sin HSV)
-    std::vector<TextRow> textRows;       // arte ASCII (objetos de texto)
-    std::vector<std::array<uint8_t, 3>> palette;   // colores de los canales (índice = Shape::pal)
-    Image previewImg;                    // vista previa propia (ASCII); vacía = renderizar `shapes`
     std::string note;                    // info extra para mostrar al usuario
 };
 
 inline bool isCancelled(Progress* p) { return p && p->cancel.load(std::memory_order_relaxed); }
 inline void report(Progress* p, float f) { if (p) p->fraction.store(f, std::memory_order_relaxed); }
-
-// ------------------------------------------------------------------- rng ---
-
-struct Rng {
-    uint64_t state, inc;
-    explicit Rng(uint64_t seed = 1) : state(0), inc((seed << 1u) | 1u) { next(); state += seed * 0x9E3779B97F4A7C15ULL; next(); }
-    uint32_t next() {
-        uint64_t old = state;
-        state = old * 6364136223846793005ULL + inc;
-        uint32_t xs = uint32_t(((old >> 18u) ^ old) >> 27u);
-        uint32_t rot = uint32_t(old >> 59u);
-        return (xs >> rot) | (xs << ((~rot + 1u) & 31u));
-    }
-    float f() { return float(next() >> 8) * (1.0f / 16777216.0f); }
-    float range(float a, float b) { return a + (b - a) * f(); }
-    int below(int n) { return n <= 1 ? 0 : int(next() % uint32_t(n)); }
-    float gauss() {                       // aprox. normal(0,1)
-        float s = 0; for (int i = 0; i < 4; ++i) s += f();
-        return (s - 2.f) * 1.7320508f;
-    }
-};
 
 // -------------------------------------------------------------- redimensión
 
@@ -335,6 +259,17 @@ inline double computePsnr(const Image& target, const Image& render, int alphaThr
 inline double nowMs() {
     using namespace std::chrono;
     return duration<double, std::milli>(steady_clock::now().time_since_epoch()).count();
+}
+
+
+// Pasa la imagen a escala de grises (conserva el alfa).
+inline Image toGrayscale(const Image& src) {
+    Image o = src;
+    for (size_t i = 0; i < o.rgba.size(); i += 4) {
+        double y = 0.299 * o.rgba[i] + 0.587 * o.rgba[i + 1] + 0.114 * o.rgba[i + 2];
+        o.rgba[i] = o.rgba[i + 1] = o.rgba[i + 2] = uint8_t(std::clamp(y + 0.5, 0.0, 255.0));
+    }
+    return o;
 }
 
 } // namespace gdx
