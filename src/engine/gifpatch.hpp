@@ -166,12 +166,12 @@ inline PatchSet convertPatches(const GifData& g, const GifPlan& plan, Method tra
             for (int x = 0; x < rw; ++x) {
                 const size_t p = size_t(y) * size_t(rw) + size_t(x);
                 if (f[p * 4 + 3] < thr) continue;
-                bool near = changed[p] != 0;
-                for (int dy = -kRing; dy <= kRing && !near; ++dy) {
+                bool inRing = changed[p] != 0;
+                for (int dy = -kRing; dy <= kRing && !inRing; ++dy) {
                     int yy = y + dy;
-                    if (yy >= 0 && yy < rh && hz[size_t(yy) * size_t(rw) + size_t(x)]) near = true;
+                    if (yy >= 0 && yy < rh && hz[size_t(yy) * size_t(rw) + size_t(x)]) inRing = true;
                 }
-                if (!near) continue;
+                if (!inRing) continue;
                 pi.rgba[p * 4] = f[p * 4]; pi.rgba[p * 4 + 1] = f[p * 4 + 1];
                 pi.rgba[p * 4 + 2] = f[p * 4 + 2]; pi.rgba[p * 4 + 3] = 255;
             }
