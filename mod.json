@@ -1,0 +1,168 @@
+{
+	"geode": "5.11.2",
+	"gd": {
+		"win": "2.2081",
+		"android": "2.2081",
+		"mac": "2.2081",
+		"ios": "2.2081"
+	},
+	"id": "patasma.gif_importer",
+	"name": "GIF Importer",
+	"version": "v0.1.0-beta",
+	"developer": "Patasma",
+	"description": "Importa GIFs animados al editor usando Alpha triggers + Spawn triggers en bucle infinito. Eliges objetos por frame y metodo de imagen (17 metodos). BETA.",
+	"resources": {
+		"spritesheets": {
+			"GifBtn": [
+				"res/gdGifBtn.png"
+			]
+		}
+	},
+	"settings": {
+		"title-gif": {
+			"name": "Animacion",
+			"type": "title"
+		},
+		"speed": {
+			"type": "float",
+			"default": 1.0,
+			"min": 0.1,
+			"max": 10.0,
+			"name": "Velocidad",
+			"description": "Multiplicador de velocidad de la animacion (2.0 = el doble de rapido)."
+		},
+		"min-delay": {
+			"type": "float",
+			"default": 0.03,
+			"min": 0.01,
+			"max": 0.5,
+			"name": "Retardo minimo por frame (s)",
+			"description": "Ningun frame dura menos que esto. GD no puede cambiar de frame mas rapido que sus ticks; <cy>0.03</c> es seguro."
+		},
+		"max-total-objects": {
+			"type": "int",
+			"default": 40000,
+			"min": 2000,
+			"max": 150000,
+			"name": "Tope total de objetos",
+			"description": "Objetos de todos los frames + triggers. Si frames x objetos por frame se pasa, se recortan los objetos por frame."
+		},
+		"first-group": {
+			"type": "int",
+			"default": 1,
+			"min": 1,
+			"max": 9000,
+			"name": "Primer grupo",
+			"description": "Los grupos se asignan por encima del grupo mas alto que ya use el nivel, pero nunca por debajo de este numero. Se usan <cy>2 x frames + 2</c> grupos."
+		},
+		"triggers-at-start": {
+			"type": "bool",
+			"default": true,
+			"name": "Arrancar al inicio del nivel",
+			"description": "Los 2 triggers de arranque se colocan en x=-30 para que la animacion empiece al comenzar. Si lo desactivas, empiezan junto al borde izquierdo de la imagen (arranca cuando el jugador llega)."
+		},
+		"threads": {
+			"type": "int",
+			"default": 4,
+			"min": 1,
+			"max": 8,
+			"name": "Hilos de calculo",
+			"description": "Frames que se convierten a la vez. Bajalo en moviles lentos."
+		},
+		"title-render": {
+			"name": "Calidad y resultado",
+			"type": "title"
+		},
+		"quality": {
+			"type": "string",
+			"default": "Rapido",
+			"name": "Calidad de calculo (metodos 7 y 8)",
+			"one-of": [
+				"Rapido",
+				"Normal",
+				"Alto",
+				"Maximo"
+			],
+			"description": "Con muchos frames <cy>Rapido</c> es lo recomendable."
+		},
+		"max-raster": {
+			"type": "int",
+			"default": 384,
+			"min": 64,
+			"max": 1024,
+			"name": "Resolucion interna maxima",
+			"description": "Lado maximo (px) de la imagen de trabajo de cada frame. Mas alto = mas detalle pero mas lento."
+		},
+		"alpha-threshold": {
+			"type": "int",
+			"default": 128,
+			"min": 1,
+			"max": 255,
+			"name": "Umbral de transparencia",
+			"description": "Los pixeles con alfa menor que esto se consideran transparentes y no generan objetos."
+		},
+		"title-gd": {
+			"name": "Objetos de Geometry Dash",
+			"type": "title"
+		},
+		"color-channel": {
+			"type": "int",
+			"default": 1010,
+			"min": 1,
+			"max": 1020,
+			"name": "Canal de color",
+			"description": "Canal base de los objetos (1010 = negro). El color se aplica con HSV sobre este canal. <cr>No lo cambies</c> salvo que sepas lo que haces."
+		},
+		"bleed": {
+			"type": "float",
+			"default": 0.15,
+			"min": 0.0,
+			"max": 2.0,
+			"name": "Solape entre rectangulos",
+			"description": "Unidades extra que se ensancha cada rectangulo para evitar lineas finas entre ellos."
+		},
+		"flip-rotation": {
+			"type": "bool",
+			"default": false,
+			"name": "Invertir giro",
+			"description": "Si los rectangulos rotados (metodos 7 y 8) salen girados al reves, activalo."
+		},
+		"select-after": {
+			"type": "bool",
+			"default": true,
+			"name": "Seleccionar al colocar",
+			"description": "Selecciona los objetos importados para poder moverlos de golpe (con muchos objetos puede dar tirones)."
+		},
+		"title-mono": {
+			"name": "Estilos de tinta (metodos 9-17)",
+			"type": "title"
+		},
+		"invert-ink": {
+			"type": "bool",
+			"default": false,
+			"name": "Tinta blanca sobre negro",
+			"description": "Invierte los estilos de tinta: tinta blanca sobre fondo negro."
+		},
+		"black-channel": {
+			"type": "int",
+			"default": 1010,
+			"min": 1,
+			"max": 1020,
+			"name": "Canal negro",
+			"description": "Canal de la tinta negra en los estilos de tinta (1010 = negro)."
+		},
+		"white-channel": {
+			"type": "int",
+			"default": 1011,
+			"min": 1,
+			"max": 1020,
+			"name": "Canal blanco",
+			"description": "Canal del papel blanco en los estilos de tinta (1011 = blanco). Si el papel no sale blanco, cambia este valor."
+		}
+	},
+	"tags": [
+		"editor",
+		"offline",
+		"utility"
+	]
+}
