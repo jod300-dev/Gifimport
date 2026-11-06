@@ -23,7 +23,9 @@
 // ============================================================================
 #pragma once
 #include <algorithm>
+#include <array>
 #include <atomic>
+#include <map>
 #include <cmath>
 #include <cstdlib>
 #include <thread>
@@ -48,6 +50,8 @@ struct LayeredOptions {
     float reuse = 0.005f;     // un frame reutiliza el parche de otro (mismo rest) si difieren en menos de esta fraccion del lienzo (0 = no reutilizar)
     float stillBsp = 0.55f;   // idem para el fondo (el fondo es grande y regular: mas BSP)
     float bspFrac = 0.15f;    // fraccion del presupuesto de cada capa que usa la base BSP (el resto: rectangulos rotados)
+    int channels = 0;         // >0: colores en CANALES (sin HSV): paleta de hasta este numero de colores; 0 = HSV
+    int firstChannel = 2;     // primer canal de la paleta (el canal 1 NUNCA se usa)
     bool denoise = true;      // mediana 3x3 antes de trazar (quita el dither del GIF; el PSNR se mide contra el original)
 };
 
@@ -62,6 +66,8 @@ struct LayeredAnim {
     std::vector<int> medoid;            // frame (del plan) que representa cada rest
     std::vector<double> psnr;           // fidelidad de cada frame ya montado (dB)
     double psnrAvg = 0, psnrMin = 0;
+    std::vector<std::array<uint8_t, 3>> palette;   // colores de canal usados (vacio = HSV); el canal de palette[i] es firstChannel + i
+    int firstChannel = 2;
     int zRest = 1, zPatch = 2;          // z-order base de los rests y los parches (encima de las formas de la capa de abajo)
     int budgetTotal = 0;                // objetos de capas que se podian repartir
     int restCandidates = 0;             // K probados al elegir el numero de rests (info)
@@ -341,6 +347,70 @@ inline void paintOver(Image& dst, const Image& layer) {
 }
 
 inline int maxZ(const Result& r) { int m = 0; for (auto& s : r.shapes) m = std::max<int>(m, s.z); return m; }
+
+// ---- paleta de canales: corte mediano ponderado por area + Lloyd; cada forma pasa al color de paleta mas cercano ----
+inline uint32_t colKey(uint8_t r, uint8_t g, uint8_t b) { return (uint32_t(r) << 16) | (uint32_t(g) << 8) | b; }
+inline double colDist(const double* a, const double* b) {
+    double dr = a[0] - b[0], dg = a[1] - b[1], db = a[2] - b[2];
+    return 2.0 * dr * dr + 4.0 * dg * dg + 3.0 * db * db;
+}
+
+inline std::vector<std::array<uint8_t, 3>> buildPalette(const std::map<uint32_t, double>& hist, int K) {
+    struct C { double c[3]; double w; };
+    std::vector<C> cols; cols.reserve(hist.size());
+    for (auto& [k, w] : hist) cols.push_back({{double(k >> 16 & 255), double(k >> 8 & 255), double(k & 255)}, w});
+    std::vector<std::vector<int>> boxes(1);
+    for (int i = 0; i < int(cols.size()); ++i) boxes[0].push_back(i);
+    auto range = [&](const std::vector<int>& b, int& axis) {
+        double lo[3] = {255, 255, 255}, hi[3] = {0, 0, 0};
+        for (int i : b) for (int c = 0; c < 3; ++c) { lo[c] = std::min(lo[c], cols[size_t(i)].c[c]); hi[c] = std::max(hi[c], cols[size_t(i)].c[c]); }
+        double best = -1; axis = 0;
+        for (int c = 0; c < 3; ++c) { double r = (hi[c] - lo[c]) * (c == 1 ? 1.4 : c == 2 ? 1.1 : 1.0); if (r > best) { best = r; axis = c; } }
+        return best;
+    };
+    while (int(boxes.size()) < K) {
+        int pick = -1, pa = 0; double pbest = 0;
+        for (int bi = 0; bi < int(boxes.size()); ++bi) {
+            if (boxes[size_t(bi)].size() < 2) continue;
+            int ax; double r = range(boxes[size_t(bi)], ax);
+            double w = 0; for (int i : boxes[size_t(bi)]) w += cols[size_t(i)].w;
+            double score = r * std::sqrt(w + 1.0);
+            if (r > 0 && score > pbest) { pbest = score; pick = bi; pa = ax; }
+        }
+        if (pick < 0) break;
+        auto b = std::move(boxes[size_t(pick)]);
+        std::sort(b.begin(), b.end(), [&](int x, int y) { return cols[size_t(x)].c[pa] < cols[size_t(y)].c[pa]; });
+        double tot = 0; for (int i : b) tot += cols[size_t(i)].w;
+        double acc = 0; size_t cut = 1;
+        for (size_t i = 0; i < b.size(); ++i) { acc += cols[size_t(b[i])].w; if (acc >= tot * 0.5) { cut = std::clamp<size_t>(i + 1, 1, b.size() - 1); break; } }
+        boxes[size_t(pick)] = std::vector<int>(b.begin(), b.begin() + long(cut));
+        boxes.push_back(std::vector<int>(b.begin() + long(cut), b.end()));
+    }
+    std::vector<std::array<double, 3>> cen(boxes.size());
+    auto recenter = [&](const std::vector<std::vector<int>>& bx) {
+        for (size_t bi = 0; bi < bx.size(); ++bi) {
+            double acc[3] = {0, 0, 0}, w = 0;
+            for (int i : bx[bi]) { for (int c = 0; c < 3; ++c) acc[c] += cols[size_t(i)].c[c] * cols[size_t(i)].w; w += cols[size_t(i)].w; }
+            for (int c = 0; c < 3; ++c) cen[bi][size_t(c)] = w > 0 ? acc[c] / w : 0;
+        }
+    };
+    recenter(boxes);
+    for (int it = 0; it < 5; ++it) {                                          // Lloyd
+        std::vector<std::vector<int>> nb(boxes.size());
+        for (int i = 0; i < int(cols.size()); ++i) {
+            size_t bj = 0; double bd = 1e300;
+            for (size_t j = 0; j < cen.size(); ++j) { double d = colDist(cols[size_t(i)].c, cen[j].data()); if (d < bd) { bd = d; bj = j; } }
+            nb[bj].push_back(i);
+        }
+        std::vector<std::vector<int>> keep; std::vector<std::array<double, 3>> old = cen;
+        for (size_t j = 0; j < nb.size(); ++j) if (!nb[j].empty()) keep.push_back(std::move(nb[j]));
+        boxes = std::move(keep); cen.assign(boxes.size(), {0, 0, 0});
+        recenter(boxes);
+    }
+    std::vector<std::array<uint8_t, 3>> out;
+    for (auto& c : cen) out.push_back({uint8_t(std::clamp(c[0] + 0.5, 0.0, 255.0)), uint8_t(std::clamp(c[1] + 0.5, 0.0, 255.0)), uint8_t(std::clamp(c[2] + 0.5, 0.0, 255.0))});
+    return out;
+}
 
 // Compacta el z-order a la PROFUNDIDAD REAL de solapamiento: dos formas que no se tocan comparten z. El resultado visual es
 // identico (el orden relativo de las que si se solapan se conserva) pero en vez de miles de z distintos quedan unas decenas.
@@ -680,9 +750,35 @@ inline LayeredAnim buildLayered(const GifData& g, const GifPlan& plan, const Opt
     if (isCancelled(prog)) { A.cancelled = true; return A; }
     for (int i = 0; i < N; ++i)                                                        // un parche vacio no se muestra
         if (A.patchOf[size_t(i)] >= 0 && A.patches[size_t(A.patchOf[size_t(i)])].shapes.empty()) A.patchOf[size_t(i)] = -1;
+    // --- colores en canales: una paleta comun a todas las capas (cada color = un canal; el canal 1 nunca)
+    A.firstChannel = std::clamp(lo.firstChannel, 2, 998);
+    if (lo.channels > 0) {
+        const int K2 = std::clamp(lo.channels, 2, 999 - A.firstChannel + 1);
+        std::map<uint32_t, double> hist;
+        auto addHist = [&](const Result& r) { for (auto& sh : r.shapes) hist[lay::colKey(sh.r, sh.g, sh.b)] += double(sh.w) * sh.h + 1.0; };
+        addHist(A.still); for (auto& r : A.rests) addHist(r); for (auto& r : A.patches) addHist(r);
+        auto pal = lay::buildPalette(hist, K2);
+        std::map<uint32_t, int> cache;
+        std::vector<char> used(pal.size(), 0);
+        auto nearest = [&](uint8_t r, uint8_t g, uint8_t b) {
+            uint32_t k = lay::colKey(r, g, b);
+            auto it = cache.find(k); if (it != cache.end()) return it->second;
+            double c[3] = {double(r), double(g), double(b)}; int bi = 0; double bd = 1e300;
+            for (size_t j = 0; j < pal.size(); ++j) { double pc[3] = {double(pal[j][0]), double(pal[j][1]), double(pal[j][2])}; double d = lay::colDist(c, pc); if (d < bd) { bd = d; bi = int(j); } }
+            cache[k] = bi; return bi;
+        };
+        auto remap = [&](Result& r) {
+            for (auto& sh : r.shapes) { int bi = nearest(sh.r, sh.g, sh.b); sh.r = pal[size_t(bi)][0]; sh.g = pal[size_t(bi)][1]; sh.b = pal[size_t(bi)][2]; used[size_t(bi)] = 1; }
+            r.colored = true; r.mono = false;
+        };
+        remap(A.still); for (auto& r : A.rests) remap(r); for (auto& r : A.patches) remap(r);
+        for (size_t j = 0; j < pal.size(); ++j) if (used[j]) A.palette.push_back(pal[j]);
+    }
     lay::parallelFor(N, threads, [&](int i) {                                          // fidelidad real de cada frame montado
         const int k = A.restOf[size_t(i)], j = A.patchOf[size_t(i)];
-        Image comp = k >= 0 ? Ck[size_t(k)] : C0;
+        Image comp; comp.w = W; comp.h = H; comp.rgba.assign(size_t(W) * H * 4, 0);
+        lay::paintOver(comp, renderShapes(A.still.shapes, W, H));
+        if (k >= 0) lay::paintOver(comp, renderShapes(A.rests[size_t(k)].shapes, W, H));
         if (j >= 0) lay::paintOver(comp, renderShapes(A.patches[size_t(j)].shapes, W, H));
         A.psnr[size_t(i)] = computePsnr(orig[size_t(i)], comp, thr);
     });
@@ -755,7 +851,7 @@ inline LayeredSchedule scheduleLayered(const LayeredAnim& a) {
     const bool hasI = !s.initHidePatch.empty() || !s.initHideRest.empty();
     int acts = 0; for (auto& st : s.step) acts += st.actions();
     s.groups = s.nRests + s.nPatches + s.nSteps + 1 + (hasI ? 1 : 0);
-    s.triggers = s.nSteps + 1 + acts + int(s.initHidePatch.size() + s.initHideRest.size()) + 1 + (hasI ? 1 : 0);
+    s.triggers = s.nSteps + 1 + acts + int(s.initHidePatch.size() + s.initHideRest.size()) + 1 + (hasI ? 1 : 0) + int(a.palette.size());     // + un Color trigger por canal
     return s;
 }
 
@@ -771,6 +867,10 @@ inline std::string buildLayeredString(const LayeredAnim& a, const GifPlan& plan,
     if (!a.ok() || plan.count() != a.frames) return fail("No hay capas calculadas");
     const LayeredSchedule S = scheduleLayered(a);
     if (p.baseGroup < 1 || p.baseGroup + S.groups - 1 > 9999) return fail("No quedan grupos libres suficientes (max. 9999)");
+    const bool useCh = !a.palette.empty();
+    if (useCh && (a.firstChannel < 2 || a.firstChannel + int(a.palette.size()) - 1 > 999)) return fail("No caben los canales de color (2..999)");
+    std::map<uint32_t, int> chOf;                                   // color -> canal (nunca el 1)
+    for (size_t i = 0; i < a.palette.size(); ++i) chOf[lay::colKey(a.palette[i][0], a.palette[i][1], a.palette[i][2])] = a.firstChannel + int(i);
     const int N = a.frames, K = int(a.rests.size());
 
     // ids de grupo: rests, parches, pasos F, bucle L, inicio I
@@ -792,6 +892,11 @@ inline std::string buildLayeredString(const LayeredAnim& a, const GifPlan& plan,
         eo.groupStr = group > 0 ? std::to_string(group) : std::string();
         eo.zBase = p.eo.zBase + zTier;
         eo.monoFastPath = false;
+        if (useCh) {                                               // orden de aparicion de los colores de ESTA capa -> canal global
+            ChannelMap cm = buildChannelMap(r);
+            eo.channels.assign(cm.colors.size(), 0);
+            for (size_t i = 0; i < cm.colors.size(); ++i) eo.channels[i] = chOf.at(lay::colKey(cm.colors[i][0], cm.colors[i][1], cm.colors[i][2]));
+        }
         std::string s = toGdString(r, eo);
         if (!s.empty()) { out += s; out += ';'; }
     };
@@ -831,6 +936,17 @@ inline std::string buildLayeredString(const LayeredAnim& a, const GifPlan& plan,
     detail::addSpawn(out, p, sx, sy, L, 0, 0);
     if (hasI) detail::addSpawn(out, p, sx, sy + 30.0, I, 0, 0);
 
+    if (useCh) {                                               // Color triggers (id 899) al inicio: fijan el color de cada canal
+        for (size_t i = 0; i < a.palette.size(); ++i) {
+            const double cx = p.trigX - 30.0 * double(1 + int(i) % 25), cy = sy + 60.0 + 30.0 * double(int(i) / 25);
+            detail::addTriggerHead(out, 899, cx, cy);
+            out += ",7,"; out += std::to_string(a.palette[i][0]);
+            out += ",8,"; out += std::to_string(a.palette[i][1]);
+            out += ",9,"; out += std::to_string(a.palette[i][2]);
+            out += ",10,0,35,1,17,0,23,"; out += std::to_string(a.firstChannel + int(i));
+            out += ';';
+        }
+    }
     if (!out.empty() && out.back() == ';') out.pop_back();
     return out;
 }

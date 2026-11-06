@@ -1,3 +1,6 @@
+# v0.3.0-beta
+- Metodo 18: colores en canales (sin HSV) con paleta comun y Color triggers al inicio; el canal 1 nunca se usa. Ajustes: colores en canales, tamano de paleta, primer canal.
+
 # v0.2.2-beta
 - Fix de compilacion en Windows: `far` y `small` son macros de windows.h; renombrados en layered.hpp.
 

@@ -2,10 +2,11 @@
 // rasteriza los objetos visibles en cada frame y mide el PSNR contra el GIF original.
 // Tambien compara con el metodo normal (un frame = un grupo) usando el mismo numero total de objetos.
 //   g++ -O2 -std=c++20 -pthread -Iinclude -Isrc/engine tests/layered_test.cpp -o layered_test
-//   ./layered_test tests/test.gif [maxFrames] [objetosPorFrame] [inner 0|1|2] [rests] [tol] [denoise 0|1] [timeExp] [painter 0|1] [bspFrac] [reuse]
+//   ./layered_test tests/test.gif [maxFrames] [objetosPorFrame] [inner 0|1|2] [rests] [tol] [denoise 0|1] [timeExp] [painter 0|1] [bspFrac] [reuse] [stillBsp] [quality] [canales] [primerCanal]
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_NO_STDIO
 #include "layered.hpp"
+#include <array>
 #include <fstream>
 #include <iostream>
 #include <map>
@@ -41,7 +42,7 @@ int main(int argc, char** argv) {
     LayeredOptions lo; lo.perFrame = argc > 3 ? std::atoi(argv[3]) : 300;
     lo.inner = argc > 4 ? std::atoi(argv[4]) : 0; lo.restCount = argc > 5 ? std::atoi(argv[5]) : 0;
     if (argc > 6) lo.tol = std::atoi(argv[6]);
-    lo.maxTotal = 150000; if (argc > 7) lo.denoise = std::atoi(argv[7]) != 0; if (argc > 8) lo.timeExp = float(std::atof(argv[8])); if (argc > 9) lo.painter = std::atoi(argv[9]); if (argc > 10) lo.bspFrac = float(std::atof(argv[10])); if (argc > 11) lo.reuse = float(std::atof(argv[11])); if (argc > 12) lo.stillBsp = float(std::atof(argv[12]));
+    lo.maxTotal = 150000; if (argc > 7) lo.denoise = std::atoi(argv[7]) != 0; if (argc > 8) lo.timeExp = float(std::atof(argv[8])); if (argc > 9) lo.painter = std::atoi(argv[9]); if (argc > 10) lo.bspFrac = float(std::atof(argv[10])); if (argc > 11) lo.reuse = float(std::atof(argv[11])); if (argc > 12) lo.stillBsp = float(std::atof(argv[12])); if (argc > 14) lo.channels = std::atoi(argv[14]); if (argc > 15) lo.firstChannel = std::atoi(argv[15]);
     std::cout << "GIF " << g.w << "x" << g.h << " frames=" << g.frames.size() << "\n";
 
     GifPlan plan = planFrames(g, maxFrames, 1.0, 0.03);
@@ -73,6 +74,16 @@ int main(int argc, char** argv) {
     std::string err, str = buildLayeredString(A, plan, p, &err);
     if (str.empty()) { std::cout << "FAIL string: " << err << "\n"; return 1; }
     auto objs = parse(str);
+    std::map<int, std::array<uint8_t,3>> chCol; int hsvObjs = 0, ch1Objs = 0, colorTrig = 0, shapeObjs = 0;
+    for (auto& ob : objs) {
+        int id = std::stoi(ob.kv.at(1));
+        if (id == 899) { ++colorTrig; chCol[std::stoi(ob.kv.at(23))] = {uint8_t(std::stoi(ob.kv.at(7))), uint8_t(std::stoi(ob.kv.at(8))), uint8_t(std::stoi(ob.kv.at(9)))}; }
+        if (id == 3092) { ++shapeObjs; if (ob.kv.count(43) || ob.kv.count(41)) ++hsvObjs; if (ob.kv.count(21) && std::stoi(ob.kv.at(21)) == 1) ++ch1Objs; }
+        for (auto& [k, v] : ob.kv) if (id == 899 && k == 23 && std::stoi(v) == 1) ++ch1Objs;
+    }
+    std::cout << "COLOR: objetos=" << shapeObjs << " con HSV=" << hsvObjs << " en canal 1=" << ch1Objs << " color-triggers=" << colorTrig << " canales=" << chCol.size() << "\n";
+    const bool chMode = lo.channels > 0;
+    if (chMode && (hsvObjs || ch1Objs || !colorTrig)) { std::cout << "FALLO: modo canales incorrecto\n"; return 1; }
     std::map<int,int> opacity; auto op = [&](int gid) { return opacity.count(gid) ? opacity[gid] : 1; };
     std::map<int,std::vector<int>> inGroup;
     for (int i = 0; i < int(objs.size()); ++i) { int id = std::stoi(objs[size_t(i)].kv[1]); if (id == 1007 || id == 1268) for (int gg : objs[size_t(i)].groups) inGroup[gg].push_back(i); }
@@ -104,8 +115,9 @@ int main(int argc, char** argv) {
             Image c; c.w = A.W; c.h = A.H; c.rgba.assign(size_t(A.W) * A.H * 4, 0);
             for (auto* ob : shown) {
                 double x = std::stod(ob->kv.at(2)), y = std::stod(ob->kv.at(3)), w = std::stod(ob->kv.at(128)), h = std::stod(ob->kv.at(129));
-                std::stringstream hs(ob->kv.at(43)); std::string tok; std::vector<double> hv; while (std::getline(hs, tok, 'a')) hv.push_back(std::stod(tok));
-                uint8_t rgb[3]; hsv2rgb(hv[0], hv[1], hv[2], rgb);
+                uint8_t rgb[3];
+                if (chMode) { auto& cc = chCol.at(std::stoi(ob->kv.at(21))); rgb[0] = cc[0]; rgb[1] = cc[1]; rgb[2] = cc[2]; }
+                else { std::stringstream hs(ob->kv.at(43)); std::string tok; std::vector<double> hv; while (std::getline(hs, tok, 'a')) hv.push_back(std::stod(tok)); hsv2rgb(hv[0], hv[1], hv[2], rgb); }
                 double cx = A.W * 0.5 + x * ppu, cy = A.H * 0.5 - y * ppu, hw = w * ppu * 0.5, hh = h * ppu * 0.5;
                 const double rot = ob->kv.count(6) ? std::stod(ob->kv.at(6)) : 0.0;
                 if (std::abs(rot) < 1e-6) {

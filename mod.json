@@ -8,7 +8,7 @@
 	},
 	"id": "patasma.gif_importer",
 	"name": "GIF Importer",
-	"version": "v0.2.2-beta",
+	"version": "v0.3.0-beta",
 	"developer": "Patasma",
 	"description": "Importa GIFs animados al editor usando Alpha triggers + Spawn triggers en bucle infinito. Eliges objetos por frame y metodo de imagen (17 metodos + metodo 18 por capas: fondo, rests y parches). BETA.",
 	"resources": {
@@ -184,6 +184,28 @@
 			"max": 10.0,
 			"name": "Reutilizar parches (%)",
 			"description": "Un frame que difiere de otro (mismo rest) en menos de este % del lienzo muestra el mismo parche: cero objetos extra para pausas, duplicados e idas y vueltas, y ese presupuesto va a los demas. <cy>0</c> = nunca reutilizar."
+		},
+		"layered-channels": {
+			"type": "bool",
+			"default": true,
+			"name": "Colores en canales (sin HSV)",
+			"description": "Los objetos usan <cy>canales de color</c> en vez de HSV: el color de cada canal lo fija un <cy>Color trigger</c> al inicio del nivel. El <cr>canal 1 nunca se usa</c>. Los colores aparecen al <cy>jugar</c> (y en el editor si tiene la vista previa de triggers de color)."
+		},
+		"layered-palette-size": {
+			"type": "int",
+			"default": 128,
+			"min": 8,
+			"max": 900,
+			"name": "Colores de la paleta (canales)",
+			"description": "Numero maximo de colores = canales usados y Color triggers. 128 pierde casi nada de calidad; 32 ya es muy aceptable."
+		},
+		"layered-first-channel": {
+			"type": "int",
+			"default": 2,
+			"min": 2,
+			"max": 900,
+			"name": "Primer canal de color",
+			"description": "Se usan los canales desde este hasta (este + colores - 1). Elige un rango <cy>libre</c> en tu nivel. El 1 queda siempre vacio."
 		},
 		"layered-denoise": {
 			"type": "bool",

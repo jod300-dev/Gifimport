@@ -309,6 +309,8 @@ gdx::LayeredOptions GifPopup::makeLayeredOptions() const {
     lo.tol = std::clamp(int(mod->getSettingValue<int>("layered-tolerance")), 8, 80);
     lo.denoise = mod->getSettingValue<bool>("layered-denoise");
     lo.painter = mod->getSettingValue<bool>("layered-rotated") ? 1 : 0;
+    lo.channels = mod->getSettingValue<bool>("layered-channels") ? std::clamp(int(mod->getSettingValue<int>("layered-palette-size")), 8, 900) : 0;
+    lo.firstChannel = std::clamp(int(mod->getSettingValue<int>("layered-first-channel")), 2, 900);   // el canal 1 nunca se usa
     lo.reuse = float(std::clamp(mod->getSettingValue<double>("layered-reuse"), 0.0, 10.0) / 100.0);
     return lo;
 }
@@ -327,6 +329,8 @@ std::string GifPopup::layeredKey() const {
     key += mod->getSettingValue<bool>("layered-rotated") ? "|r1|" : "|r0|";
     key += std::to_string(mod->getSettingValue<double>("layered-reuse"));
     key += "|" + mod->getSettingValue<std::string>("quality");
+    key += mod->getSettingValue<bool>("layered-channels") ? "|c" : "|h";
+    key += std::to_string(mod->getSettingValue<int>("layered-palette-size")) + "," + std::to_string(mod->getSettingValue<int>("layered-first-channel"));
     return key;
 }
 
@@ -442,7 +446,10 @@ void GifPopup::applyPreview(std::shared_ptr<PreviewJob> job) {
         size_t objs = A.objectCount() + size_t(gdx::layeredTriggerCount(A));
         char a2[96], b2[96];
         std::snprintf(a2, sizeof a2, "%d frames | %zu objetos", A.frames, objs);
-        std::snprintf(b2, sizeof b2, "%d rests | %.1f dB | %.1f s", int(A.rests.size()), A.psnrAvg, m_layeredPlan.total);
+        if (!A.palette.empty())
+            std::snprintf(b2, sizeof b2, "%d rests | %.1f dB | canales %d-%d", int(A.rests.size()), A.psnrAvg, A.firstChannel, A.firstChannel + int(A.palette.size()) - 1);
+        else
+            std::snprintf(b2, sizeof b2, "%d rests | %.1f dB | %.1f s", int(A.rests.size()), A.psnrAvg, m_layeredPlan.total);
         this->setStatus(a2, b2, m_result.note);
         return;
     }
