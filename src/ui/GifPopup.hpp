@@ -5,29 +5,33 @@
 #include <string>
 #include <vector>
 
-#include "gifpatch.hpp"
+#include "engine.hpp"
+#include "gdexport.hpp"
+#include "gifanim.hpp"
+#include "layered.hpp"      // metodo 18 (capas: fondo + rests + parches)
 
 using namespace geode::prelude;
 
-// Ventana del importador de GIF (metodo de parches):
-//   izquierda: vista previa del frame 0 + estado
-//   derecha: objetos por frame, lado largo, escala de grises, y botones GIF / Colocar / Ajustes
+// Ventana del importador de GIF (430x290):
+//   izquierda: vista previa del frame 0 convertido + estado
+//   derecha: metodo, objetos por frame, lado largo, frames maximos, gris
 class GifPopup : public geode::Popup {
 public:
     static GifPopup* create(EditorUI* editor);
     ~GifPopup();
 
 protected:
-    // Fondo + parche 0 (vista previa) en un hilo aparte
+    // Calculo del frame 0 (vista previa) en un hilo aparte
     struct PreviewJob {
         gdx::Progress prog;
         std::shared_ptr<const gdx::GifData> gif;
-        gdx::GifPlan plan;
+        int frameIdx = 0;
+        gdx::Method method = gdx::Method::BSP;
         gdx::Options opt;
-        gdx::PatchParams pp;
         int id = 0;
-        gdx::PatchSet patchSet;
-        gdx::Result result;               // fondo + parche 0 combinados
+        gdx::Result result;
+        gdx::GifPlan plan;                                   // metodo 18
+        std::shared_ptr<gdx::LayeredAnim> layered;           // metodo 18: capas completas (el result es el frame 0 montado)
         std::atomic<bool> done{false};
     };
     // Conversion de todos los frames (al pulsar Colocar)
@@ -35,9 +39,11 @@ protected:
         gdx::Progress prog;
         std::shared_ptr<const gdx::GifData> gif;
         gdx::GifPlan plan;
+        gdx::Method method = gdx::Method::BSP;
         gdx::Options opt;
-        gdx::PatchParams pp;
-        gdx::PatchSet patchSet;
+        int threads = 2;
+        std::vector<gdx::Result> results;
+        std::shared_ptr<gdx::LayeredAnim> layered;           // metodo 18
         std::atomic<bool> done{false};
     };
 
@@ -47,10 +53,14 @@ protected:
     void onPlace(CCObject*);
     void onInfo(CCObject*);
     void onSettings(CCObject*);
+    void onPrev(CCObject*) { stepMethod(-1); }
+    void onNext(CCObject*) { stepMethod(+1); }
     void onPerFrameSlider(CCObject* sender);
     void onSizeSlider(CCObject* sender);
+    void onFramesSlider(CCObject* sender);
     void onGray(CCObject*);
 
+    void stepMethod(int dir);
     void refreshLabels();
     void loadGifBytes(std::vector<uint8_t> const& bytes);
     void scheduleRecompute();
@@ -61,13 +71,17 @@ protected:
     void buildPreview();
     void setStatus(std::string const& a, std::string const& b = "", std::string const& note = "");
 
+    // Indice del metodo 18 (capas) en la lista de la ventana: va despues de los 17 metodos de imagen.
+    static constexpr int kLayeredIndex = int(gdx::Method::Ascii);
+    bool layered() const { return m_method == kLayeredIndex; }
+    gdx::Method method() const { return layered() ? gdx::Method::BSP : gdx::Method(m_method); }
+    gdx::LayeredOptions makeLayeredOptions() const;
+    std::string layeredKey() const;
     gdx::Options makeOptions(int perFrame) const;
-    gdx::PatchParams makePatchParams(int baseBudget) const;
     gdx::GdExportOptions makeExportOptions() const;
     gdx::GifPlan makePlan() const;
+    int effectivePerFrame(int frames) const;
     int maxTotal() const;
-    int baseBudget() const;
-    int patchBudget(int frames) const;
     CCPoint placementOrigin() const;
     int maxUsedGroup() const;
 
@@ -76,18 +90,26 @@ protected:
     std::shared_ptr<PreviewJob> m_job;
     std::shared_ptr<BuildJob> m_build;
     int m_jobCounter = 0;
-    gdx::PatchSet m_patchSet;             // fondo + parche 0 (vista previa)
-    gdx::Result m_result;                 // fondo + parche 0 combinados
+    std::shared_ptr<gdx::LayeredAnim> m_layered;   // metodo 18: capas calculadas por la vista previa (se reutilizan al colocar)
+    gdx::GifPlan m_layeredPlan;
+    std::string m_layeredKey;
+    gdx::Result m_result;                 // frame 0 convertido (vista previa)
     bool m_hasResult = false;
 
-    int m_perFrame = 300;                 // objetos por frame (limite de cada parche)
+    int m_method = 2;                     // 0..17 (17 = capas; BSP por defecto)
+    int m_perFrame = 300;                 // objetos por frame
     int m_sizeU = 600;                    // lado largo, unidades GD
+    int m_maxFrames = 40;                 // frames maximos a usar
     bool m_gray = false;
 
+    CCLabelBMFont* m_methodLabel = nullptr;
+    CCLabelBMFont* m_descLabel = nullptr;
     CCLabelBMFont* m_perFrameValue = nullptr;
     CCLabelBMFont* m_sizeValue = nullptr;
+    CCLabelBMFont* m_framesValue = nullptr;
     Slider* m_perFrameSlider = nullptr;
     Slider* m_sizeSlider = nullptr;
+    Slider* m_framesSlider = nullptr;
     CCMenuItemToggler* m_chkGray = nullptr;
     CCLabelBMFont* m_statA = nullptr;
     CCLabelBMFont* m_statB = nullptr;

@@ -8,9 +8,9 @@
 	},
 	"id": "patasma.gif_importer",
 	"name": "GIF Importer",
-	"version": "v0.3.0-beta",
+	"version": "v0.2.1-beta",
 	"developer": "Patasma",
-	"description": "Importa GIFs animados al editor con Alpha triggers + Spawn triggers en bucle infinito. Metodo de parches: el fondo se traza una vez y cada frame solo lleva lo que cambia. BETA.",
+	"description": "Importa GIFs animados al editor usando Alpha triggers + Spawn triggers en bucle infinito. Eliges objetos por frame y metodo de imagen (17 metodos + metodo 18 por capas: fondo, rests y parches). BETA.",
 	"resources": {
 		"spritesheets": {
 			"GifBtn": [
@@ -19,7 +19,7 @@
 		}
 	},
 	"settings": {
-		"title-anim": {
+		"title-gif": {
 			"name": "Animacion",
 			"type": "title"
 		},
@@ -39,21 +39,13 @@
 			"name": "Retardo minimo por frame (s)",
 			"description": "Ningun frame dura menos que esto. GD no puede cambiar de frame mas rapido que sus ticks; <cy>0.03</c> es seguro."
 		},
-		"max-frames": {
-			"type": "int",
-			"default": 40,
-			"min": 2,
-			"max": 300,
-			"name": "Frames maximos",
-			"description": "Si el GIF tiene mas frames, se reparten de forma uniforme y se conserva la duracion total."
-		},
 		"max-total-objects": {
 			"type": "int",
 			"default": 40000,
 			"min": 2000,
 			"max": 150000,
 			"name": "Tope total de objetos",
-			"description": "Fondo + parches + triggers. Si se pasa, se recortan los objetos por frame."
+			"description": "Objetos de todos los frames + triggers. Si frames x objetos por frame se pasa, se recortan los objetos por frame."
 		},
 		"first-group": {
 			"type": "int",
@@ -61,21 +53,13 @@
 			"min": 1,
 			"max": 9000,
 			"name": "Primer grupo",
-			"description": "Los grupos se asignan por encima del grupo mas alto que ya use el nivel, pero nunca por debajo de este numero. Se usan <cy>2 x frames + 1</c> grupos."
+			"description": "Los grupos se asignan por encima del grupo mas alto que ya use el nivel, pero nunca por debajo de este numero. Se usan <cy>2 x frames + 2</c> grupos."
 		},
 		"triggers-at-start": {
 			"type": "bool",
 			"default": true,
-			"name": "Arrancar en la x de abajo",
-			"description": "Activado: el trigger de arranque va en la x de <cy>Trigger de arranque: x</c> (inicio del nivel). Desactivado: va junto al borde izquierdo de la imagen (arranca cuando el jugador llega)."
-		},
-		"trigger-x": {
-			"type": "int",
-			"default": 0,
-			"min": -2000,
-			"max": 100000,
-			"name": "Trigger de arranque: x",
-			"description": "Posicion x del trigger que arranca el bucle. <cy>0</c> = inicio del nivel. Si la animacion no arranca prueba con <cy>15</c> o <cy>-30</c>, o desactiva la opcion de arriba."
+			"name": "Arrancar al inicio del nivel",
+			"description": "Los 2 triggers de arranque se colocan en x=-30 para que la animacion empiece al comenzar. Si lo desactivas, empiezan junto al borde izquierdo de la imagen (arranca cuando el jugador llega)."
 		},
 		"threads": {
 			"type": "int",
@@ -85,25 +69,21 @@
 			"name": "Hilos de calculo",
 			"description": "Frames que se convierten a la vez. Bajalo en moviles lentos."
 		},
-		"title-patch": {
-			"name": "Metodo de parches",
+		"title-render": {
+			"name": "Calidad y resultado",
 			"type": "title"
 		},
-		"patch-tolerance": {
-			"type": "int",
-			"default": 28,
-			"min": 4,
-			"max": 120,
-			"name": "Tolerancia de cambio",
-			"description": "Diferencia de color (0-255) a partir de la cual un pixel cuenta como \"cambiado\" y entra en el parche. Mas alto = parches mas pequenos (menos objetos) pero movimiento menos fiel."
-		},
-		"base-multiplier": {
-			"type": "int",
-			"default": 6,
-			"min": 1,
-			"max": 20,
-			"name": "Presupuesto del fondo (x)",
-			"description": "El fondo estatico usa <cy>objetos por frame x este numero</c> (se traza una sola vez, asi que es barato darle mas detalle)."
+		"quality": {
+			"type": "string",
+			"default": "Rapido",
+			"name": "Calidad de calculo (metodos 7 y 8)",
+			"one-of": [
+				"Rapido",
+				"Normal",
+				"Alto",
+				"Maximo"
+			],
+			"description": "Con muchos frames <cy>Rapido</c> es lo recomendable."
 		},
 		"max-raster": {
 			"type": "int",
@@ -111,7 +91,7 @@
 			"min": 64,
 			"max": 1024,
 			"name": "Resolucion interna maxima",
-			"description": "Lado maximo (px) de la imagen de trabajo. Mas alto = mas detalle pero mas lento."
+			"description": "Lado maximo (px) de la imagen de trabajo de cada frame. Mas alto = mas detalle pero mas lento."
 		},
 		"alpha-threshold": {
 			"type": "int",
@@ -121,6 +101,18 @@
 			"name": "Umbral de transparencia",
 			"description": "Los pixeles con alfa menor que esto se consideran transparentes y no generan objetos."
 		},
+		"title-gd": {
+			"name": "Objetos de Geometry Dash",
+			"type": "title"
+		},
+		"color-channel": {
+			"type": "int",
+			"default": 1010,
+			"min": 1,
+			"max": 1020,
+			"name": "Canal de color",
+			"description": "Canal base de los objetos (1010 = negro). El color se aplica con HSV sobre este canal. <cr>No lo cambies</c> salvo que sepas lo que haces."
+		},
 		"bleed": {
 			"type": "float",
 			"default": 0.15,
@@ -129,11 +121,75 @@
 			"name": "Solape entre rectangulos",
 			"description": "Unidades extra que se ensancha cada rectangulo para evitar lineas finas entre ellos."
 		},
+		"flip-rotation": {
+			"type": "bool",
+			"default": false,
+			"name": "Invertir giro",
+			"description": "Si los rectangulos rotados (metodos 7 y 8) salen girados al reves, activalo."
+		},
 		"select-after": {
 			"type": "bool",
 			"default": true,
 			"name": "Seleccionar al colocar",
 			"description": "Selecciona los objetos importados para poder moverlos de golpe (con muchos objetos puede dar tirones)."
+		},
+		"title-mono": {
+			"name": "Estilos de tinta (metodos 9-17)",
+			"type": "title"
+		},
+		"invert-ink": {
+			"type": "bool",
+			"default": false,
+			"name": "Tinta blanca sobre negro",
+			"description": "Invierte los estilos de tinta: tinta blanca sobre fondo negro."
+		},
+		"black-channel": {
+			"type": "int",
+			"default": 1010,
+			"min": 1,
+			"max": 1020,
+			"name": "Canal negro",
+			"description": "Canal de la tinta negra en los estilos de tinta (1010 = negro)."
+		},
+		"white-channel": {
+			"type": "int",
+			"default": 1011,
+			"min": 1,
+			"max": 1020,
+			"name": "Canal blanco",
+			"description": "Canal del papel blanco en los estilos de tinta (1011 = blanco). Si el papel no sale blanco, cambia este valor."
+		},
+		"title-layered": {
+			"name": "Capas (metodo 18)",
+			"type": "title"
+		},
+		"layered-tolerance": {
+			"type": "int",
+			"default": 28,
+			"min": 8,
+			"max": 80,
+			"name": "Umbral de cambio",
+			"description": "Diferencia de color (0-255) a partir de la cual algo cuenta como movimiento y entra en un rest o parche. <cy>Bajo</c> = mas fiel pero mas objetos en parches; <cy>alto</c> = mas objetos para el fondo y menos ghosting corregido."
+		},
+		"layered-rotated": {
+			"type": "bool",
+			"default": true,
+			"name": "Rectangulos rotados",
+			"description": "Tras la base BSP de cada capa, coloca rectangulos <cy>rotados</c> guiados por el error sobre lo que ya se ve (contornos, diagonales y detalle fino con muy pocos objetos). Solo con GIF sin transparencia. Es algo mas lento; en <cy>Calidad de calculo = Alto</c> sube un poco mas."
+		},
+		"layered-reuse": {
+			"type": "float",
+			"default": 0.5,
+			"min": 0.0,
+			"max": 10.0,
+			"name": "Reutilizar parches (%)",
+			"description": "Un frame que difiere de otro (mismo rest) en menos de este % del lienzo muestra el mismo parche: cero objetos extra para pausas, duplicados e idas y vueltas, y ese presupuesto va a los demas. <cy>0</c> = nunca reutilizar."
+		},
+		"layered-denoise": {
+			"type": "bool",
+			"default": true,
+			"name": "Quitar ruido del GIF",
+			"description": "Aplica una mediana 3x3 antes de trazar las capas. Quita el dither/ruido de paleta de los GIF (no gasta objetos en ruido). Desactivalo para GIF de pixel art."
 		}
 	},
 	"tags": [

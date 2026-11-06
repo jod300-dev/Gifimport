@@ -1,15 +1,13 @@
-# v0.3.0-beta
-- Proyecto independiente: se elimino todo lo del Image Exporter (17 metodos, estilos de tinta, regiones, geometrize, ASCII, canales de color...). Solo queda el **metodo de parches** (trazador BSP).
-- Ventana minima: objetos por frame, lado largo, escala de grises, GIF / Colocar / Ajustes. "Frames maximos" paso a Ajustes.
-- Triggers mas robustos: un unico trigger de arranque (antes 2), sin grupo de inicio aparte; el primer frame de cada vuelta vuelve a ocultar todos los demas, asi cada vuelta se resincroniza sola.
-- Los triggers ya no se colocan en x negativa. Nuevo ajuste "Trigger de arranque: x" (por defecto 0).
-- El algoritmo del metodo vive solo en `src/engine/gifpatch.hpp` (se puede reemplazar sin tocar la ventana).
-
 # v0.2.1-beta
-- Fix de compilacion en Windows: la variable `near` chocaba con la macro de windows.h.
+- Metodo 18: cada capa lleva ahora rectangulos rotados guiados por el error sobre el composite real (mucho mas detalle en contornos y diagonales con los mismos objetos).
+- Metodo 18: los frames casi identicos reutilizan parche; z-order compactado; nuevos ajustes "Rectangulos rotados" y "Reutilizar parches".
 
 # v0.2.0-beta
-- Metodo de parches (estatico + parches).
+- Metodo 18 (capas): fondo trazado una vez + rests (poses de reposo) + parches por frame, en lazo cerrado. Mas nitidez a igualdad de objetos y sin parpadeo del fondo.
+- Nuevos ajustes: umbral de cambio y quitar ruido del GIF.
+- Los metodos 1-17 no cambian.
 
 # v0.1.0-beta
-- Primera version.
+- Primera version: importa GIFs animados con Alpha triggers + Spawn triggers en bucle infinito.
+- 17 metodos de imagen (los del Image Exporter, sin ASCII), objetos por frame, frames maximos, escala de grises.
+- Retardos reales del GIF, velocidad ajustable y tope total de objetos.
