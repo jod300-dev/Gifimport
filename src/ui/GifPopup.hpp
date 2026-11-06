@@ -8,6 +8,7 @@
 #include "engine.hpp"
 #include "gdexport.hpp"
 #include "gifanim.hpp"
+#include "gifpatch.hpp"
 
 using namespace geode::prelude;
 
@@ -29,6 +30,12 @@ protected:
         gdx::Options opt;
         int id = 0;
         gdx::Result result;
+        // metodo "Estatico + parches"
+        bool patch = false;
+        gdx::GifPlan plan;
+        gdx::Method tracer = gdx::Method::BSP;
+        int tolerance = 28, baseBudget = 1;
+        gdx::PatchSet patchSet;
         std::atomic<bool> done{false};
     };
     // Conversion de todos los frames (al pulsar Colocar)
@@ -40,6 +47,11 @@ protected:
         gdx::Options opt;
         int threads = 2;
         std::vector<gdx::Result> results;
+        // metodo "Estatico + parches"
+        bool patch = false;
+        gdx::Method tracer = gdx::Method::BSP;
+        int tolerance = 28, baseBudget = 1;
+        gdx::PatchSet patchSet;
         std::atomic<bool> done{false};
     };
 
@@ -67,7 +79,11 @@ protected:
     void buildPreview();
     void setStatus(std::string const& a, std::string const& b = "", std::string const& note = "");
 
-    gdx::Method method() const { return gdx::Method(m_method); }
+    gdx::Method method() const { return gdx::Method(std::min(m_method, int(gdx::Method::Ascii) - 1)); }
+    bool isPatch() const { return m_method == int(gdx::Method::Ascii); }      // metodo 18: Estatico + parches
+    gdx::Method tracer() const;                                               // trazador que usa el metodo 18
+    int patchTolerance() const;
+    int patchBaseBudget() const;
     gdx::Options makeOptions(int perFrame) const;
     gdx::GdExportOptions makeExportOptions() const;
     gdx::GifPlan makePlan() const;
@@ -83,6 +99,8 @@ protected:
     int m_jobCounter = 0;
     gdx::Result m_result;                 // frame 0 convertido (vista previa)
     bool m_hasResult = false;
+    gdx::PatchSet m_patchSet;             // fondo + parche 0 (solo metodo 18)
+    bool m_patchResult = false;           // el resultado actual es de tipo parches
 
     int m_method = 2;                     // 0..16 (BSP por defecto)
     int m_perFrame = 300;                 // objetos por frame

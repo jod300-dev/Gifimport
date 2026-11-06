@@ -10,7 +10,7 @@ endif()
 
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 
-project(GifImporter VERSION 0.1.0)
+project(GifImporter VERSION 0.2.0)
 
 add_library(${PROJECT_NAME} SHARED
     src/main.cpp

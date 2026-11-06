@@ -9,7 +9,7 @@
 namespace {
     constexpr float kPopupW = 430.f, kPopupH = 290.f;
     constexpr float kPrevSize = 140.f;
-    constexpr int kMethodCount = int(gdx::Method::Ascii);          // metodos 1-17 (el ASCII no sirve para animar)
+    constexpr int kMethodCount = int(gdx::Method::Ascii) + 1;      // metodos 1-17 + el 18 (Estatico + parches); el ASCII no sirve para animar
     constexpr int kMinPF = 10, kMaxPF = 5000;                      // objetos por frame
     constexpr int kMinFrames = 2, kMaxFrames = 300;
     constexpr int kMinSize = 150, kMaxSize = 6000;
@@ -147,10 +147,15 @@ bool GifPopup::init(EditorUI* editor) {
 // ------------------------------------------------------------- etiquetas ---
 
 void GifPopup::refreshLabels() {
-    auto const& info = gdx::methodInfo(method());
-    m_methodLabel->setString(info.name);
+    if (isPatch()) {
+        m_methodLabel->setString("18. Estatico + parches");
+        m_descLabel->setString("Traza lo quieto UNA vez y solo parches con lo que cambia en cada frame. Menos objetos y sin parpadeo.");
+    } else {
+        auto const& info = gdx::methodInfo(method());
+        m_methodLabel->setString(info.name);
+        m_descLabel->setString(info.desc);
+    }
     m_methodLabel->limitLabelWidth(210.f, 0.5f, 0.2f);
-    m_descLabel->setString(info.desc);
 
     char buf[64];
     std::snprintf(buf, sizeof buf, "%d", m_perFrame);
@@ -288,6 +293,24 @@ gdx::GdExportOptions GifPopup::makeExportOptions() const {
     return eo;
 }
 
+gdx::Method GifPopup::tracer() const {
+    auto t = Mod::get()->getSettingValue<std::string>("patch-tracer");
+    if (t == "Quadtree") return gdx::Method::Quadtree;
+    if (t == "Regiones") return gdx::Method::Regions;
+    if (t == "Cuadricula") return gdx::Method::UniformGrid;
+    return gdx::Method::BSP;                                   // por defecto
+}
+
+int GifPopup::patchTolerance() const {
+    return std::clamp(Mod::get()->getSettingValue<int>("patch-tolerance"), 4, 120);
+}
+
+// Presupuesto del fondo estatico = limite por frame x multiplicador (como los "rests" del GIF to GD)
+int GifPopup::patchBaseBudget() const {
+    int mult = std::clamp(Mod::get()->getSettingValue<int>("base-multiplier"), 1, 20);
+    return gdx::patchBaseBudget(m_perFrame, mult, maxTotal());
+}
+
 int GifPopup::maxTotal() const {
     return std::clamp(Mod::get()->getSettingValue<int>("max-total-objects"), 2000, 150000);
 }
@@ -320,13 +343,30 @@ void GifPopup::recompute(float) {
     job->gif = m_gif;
     job->frameIdx = plan.idx.empty() ? 0 : plan.idx[0];
     job->method = method();
-    job->opt = makeOptions(effectivePerFrame(plan.count()));
+    if (isPatch()) {
+        int baseB = patchBaseBudget();
+        job->patch = true;
+        job->plan = plan;
+        job->tracer = tracer();
+        job->tolerance = patchTolerance();
+        job->baseBudget = baseB;
+        job->opt = makeOptions(gdx::patchPerFrameBudget(m_perFrame, plan.count(), maxTotal(), baseB));
+    } else {
+        job->opt = makeOptions(effectivePerFrame(plan.count()));
+    }
     m_job = job;
     this->setStatus("Calculando vista previa...");
 
     std::thread([job]() {
         try {
-            job->result = gdx::convert(job->gif->frames[size_t(job->frameIdx)], job->method, job->opt, &job->prog);
+            if (job->patch) {
+                // solo fondo + parche 0 (rapido)
+                job->patchSet = gdx::convertPatches(*job->gif, job->plan, job->tracer, job->opt, job->tolerance,
+                                                    job->baseBudget, &job->prog, 1, 1);
+                job->result = gdx::combineForPreview(job->patchSet);
+            } else {
+                job->result = gdx::convert(job->gif->frames[size_t(job->frameIdx)], job->method, job->opt, &job->prog);
+            }
         } catch (...) {
             job->result = gdx::Result{};
             job->result.note = "Error interno al calcular";
@@ -361,6 +401,8 @@ void GifPopup::tick(float) {
 void GifPopup::applyPreview(std::shared_ptr<PreviewJob> job) {
     if (job) {
         m_result = std::move(job->result);
+        m_patchResult = job->patch;
+        if (job->patch) m_patchSet = std::move(job->patchSet);
         m_hasResult = !m_result.shapes.empty();
         if (!m_hasResult) {
             this->setStatus("No se genero ningun objeto", "", m_result.note);
@@ -373,15 +415,28 @@ void GifPopup::applyPreview(std::shared_ptr<PreviewJob> job) {
     // estimacion del resultado completo
     gdx::GifPlan plan = makePlan();
     int n = plan.count();
-    int pf = effectivePerFrame(n);
-    size_t kb0 = gdx::toGdString(m_result, makeExportOptions()).size() / 1024;
-    size_t objs0 = m_result.shapes.size();
-    size_t totalObjs = objs0 * size_t(n) + size_t(gdx::gifTriggerCount(n));
     char a1[96], b1[96];
-    std::snprintf(a1, sizeof a1, "%d frames | ~%zu objetos", n, totalObjs);
-    std::snprintf(b1, sizeof b1, "~%zu KB | %.1f s de bucle", kb0 * size_t(n) + size_t(n) * 2, plan.total);
     std::string note = m_result.note;
-    if (pf < m_perFrame) note = "Limitado a " + std::to_string(pf) + " obj/frame por el tope total. " + note;
+    if (m_patchResult && !m_patchSet.patches.empty()) {
+        // fondo (una vez) + n parches parecidos al parche 0
+        auto eo = makeExportOptions();
+        size_t baseObjs = m_patchSet.base.shapes.size(), p0 = m_patchSet.patches[0].shapes.size();
+        size_t baseKb = gdx::toGdString(m_patchSet.base, eo).size() / 1024;
+        size_t p0Kb = gdx::toGdString(m_patchSet.patches[0], eo).size() / 1024;
+        size_t totalObjs = baseObjs + p0 * size_t(n) + size_t(gdx::gifTriggerCount(n));
+        std::snprintf(a1, sizeof a1, "%d frames | ~%zu objetos", n, totalObjs);
+        std::snprintf(b1, sizeof b1, "~%zu KB | %.1f s de bucle", baseKb + p0Kb * size_t(n) + size_t(n) * 2, plan.total);
+        int pct = m_patchSet.totalPixels ? int(m_patchSet.patchPixels0 * 100 / m_patchSet.totalPixels) : 0;
+        note = "Fondo: " + std::to_string(baseObjs) + " obj. Cambia ~" + std::to_string(pct) + "% por frame. " + note;
+    } else {
+        int pf = effectivePerFrame(n);
+        size_t kb0 = gdx::toGdString(m_result, makeExportOptions()).size() / 1024;
+        size_t objs0 = m_result.shapes.size();
+        size_t totalObjs = objs0 * size_t(n) + size_t(gdx::gifTriggerCount(n));
+        std::snprintf(a1, sizeof a1, "%d frames | ~%zu objetos", n, totalObjs);
+        std::snprintf(b1, sizeof b1, "~%zu KB | %.1f s de bucle", kb0 * size_t(n) + size_t(n) * 2, plan.total);
+        if (pf < m_perFrame) note = "Limitado a " + std::to_string(pf) + " obj/frame por el tope total. " + note;
+    }
     this->setStatus(a1, b1, note);
 }
 
@@ -482,7 +537,16 @@ void GifPopup::onPlace(CCObject*) {
     job->gif = m_gif;
     job->plan = makePlan();
     job->method = method();
-    job->opt = makeOptions(effectivePerFrame(job->plan.count()));
+    if (isPatch()) {
+        int baseB = patchBaseBudget();
+        job->patch = true;
+        job->tracer = tracer();
+        job->tolerance = patchTolerance();
+        job->baseBudget = baseB;
+        job->opt = makeOptions(gdx::patchPerFrameBudget(m_perFrame, job->plan.count(), maxTotal(), baseB));
+    } else {
+        job->opt = makeOptions(effectivePerFrame(job->plan.count()));
+    }
     unsigned hw = std::max(1u, std::thread::hardware_concurrency());
     job->threads = int(std::clamp<unsigned>(unsigned(std::max(1, Mod::get()->getSettingValue<int>("threads"))), 1u, hw));
     m_build = job;
@@ -491,9 +555,15 @@ void GifPopup::onPlace(CCObject*) {
 
     std::thread([job]() {
         try {
-            job->results = gdx::convertFrames(*job->gif, job->plan, job->method, job->opt, &job->prog, job->threads);
+            if (job->patch) {
+                job->patchSet = gdx::convertPatches(*job->gif, job->plan, job->tracer, job->opt, job->tolerance,
+                                                    job->baseBudget, &job->prog, job->threads);
+            } else {
+                job->results = gdx::convertFrames(*job->gif, job->plan, job->method, job->opt, &job->prog, job->threads);
+            }
         } catch (...) {
             job->results.clear();
+            job->patchSet = gdx::PatchSet{};
         }
         job->done.store(true, std::memory_order_release);
     }).detach();
@@ -513,20 +583,23 @@ void GifPopup::finishBuild(std::shared_ptr<BuildJob> job) {
     p.baseGroup = std::max(this->maxUsedGroup() + 1, std::clamp(mod->getSettingValue<int>("first-group"), 1, 9000));
     if (mod->getSettingValue<bool>("triggers-at-start")) {
         p.trigX = -30.0;
-    } else if (!job->results.empty()) {
-        p.trigX = origin.x - gdx::gdImageSize(job->results[0], p.eo).w * 0.5 - 30.0;
+    } else {
+        const gdx::Result* r0 = job->patch ? (job->patchSet.patches.empty() ? nullptr : &job->patchSet.patches[0])
+                                           : (job->results.empty() ? nullptr : &job->results[0]);
+        if (r0) p.trigX = origin.x - gdx::gdImageSize(*r0, p.eo).w * 0.5 - 30.0;
     }
 
     std::string err;
-    std::string str = gdx::buildGifString(job->results, job->plan, p, &err);
+    std::string str = job->patch ? gdx::buildGifPatchString(job->patchSet, job->plan, p, &err)
+                                 : gdx::buildGifString(job->results, job->plan, p, &err);
     if (str.empty()) {
         FLAlertLayer::create("GIF Importer", err.empty() ? "No se pudo generar el GIF." : err.c_str(), "OK")->show();
         this->applyPreview(nullptr);
         return;
     }
 
-    size_t shapes = 0;
-    for (auto& r : job->results) shapes += r.shapes.size();
+    size_t shapes = job->patch ? job->patchSet.base.shapes.size() : 0;
+    for (auto& r : (job->patch ? job->patchSet.patches : job->results)) shapes += r.shapes.size();
     size_t count = shapes + size_t(gdx::gifTriggerCount(N));
     CCArray* created = lel->createObjectsFromString(str.c_str(), true, true);
     if (created && created->count() > 0 && mod->getSettingValue<bool>("select-after") && m_editor) {
@@ -547,6 +620,7 @@ void GifPopup::onInfo(CCObject*) {
         "Se crean <cy>Alpha triggers</c> (mostrar este frame, ocultar el anterior) y <cy>Spawn triggers</c> con el retardo real del GIF; "
         "un Spawn final se llama a si mismo y la animacion se repite <cg>para siempre</c>.\n"
         "- <cg>Objetos por frame</c>: presupuesto de cada frame (se recorta si pasas del tope total de los ajustes).\n"
+        "- <cg>Metodo 18 (Estatico + parches)</c>: traza lo que no cambia <cy>una sola vez</c> y por frame solo un parche con lo que cambia. Menos objetos y sin parpadeo. Ajustes: trazador, tolerancia y presupuesto del fondo.\n"
         "- <cg>Frames maximos</c>: si el GIF tiene mas, se reparten de forma uniforme y se conserva la duracion.\n"
         "- En el editor los frames se ven superpuestos: <cy>dale a jugar</c> para ver la animacion.\n"
         "- Los triggers de arranque van en x=-30 (inicio del nivel); cambialo en Ajustes.\n"

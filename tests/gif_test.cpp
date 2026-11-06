@@ -1,7 +1,7 @@
 // Prueba sin Geode: decodifica un GIF, convierte frames, genera la cadena y SIMULA los triggers.
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_NO_STDIO
-#include "gifanim.hpp"
+#include "gifpatch.hpp"
 #include <fstream>
 #include <iostream>
 #include <map>
@@ -20,6 +20,53 @@ static std::vector<Obj> parse(const std::string& s) {
         v.push_back(std::move(o));
     }
     return v;
+}
+
+static bool simulate(const std::string& s, const GifPlan& plan, int baseGroup, int expectBase, std::string& why) {
+    auto objs = parse(s);
+    const int N = plan.count();
+    std::map<int,int> opacity;
+    auto op = [&](int gid) { return opacity.count(gid) ? opacity[gid] : 1; };
+    std::map<int,std::vector<int>> inGroup;
+    int staticObjs = 0;
+    for (int i = 0; i < int(objs.size()); ++i) {
+        int id = std::stoi(objs[i].kv[1]);
+        if (id == 1007 || id == 1268) for (int gg : objs[i].groups) inGroup[gg].push_back(i);
+        else if (objs[i].groups.empty()) ++staticObjs;
+    }
+    if (staticObjs != expectBase) { why = "objetos sin grupo=" + std::to_string(staticObjs) + " esperado " + std::to_string(expectBase); return false; }
+    struct Ev { double t; int seq; int obj; bool operator<(const Ev& o) const { return t > o.t || (t == o.t && seq > o.seq); } };
+    std::priority_queue<Ev> q; int seq = 0;
+    for (int i = 0; i < int(objs.size()); ++i) {
+        int id = std::stoi(objs[i].kv[1]);
+        if (id == 1268 && !objs[i].kv.count(62)) q.push({0, seq++, i});
+    }
+    std::vector<std::pair<double,std::vector<int>>> log;
+    const double tEnd = plan.total * 2.5;
+    while (!q.empty() && q.top().t <= tEnd) {
+        Ev e = q.top(); q.pop();
+        Obj& ob = objs[size_t(e.obj)]; int id = std::stoi(ob.kv[1]);
+        int target = std::stoi(ob.kv[51]);
+        if (id == 1007) opacity[target] = std::stoi(ob.kv[35]);
+        else {
+            double d = ob.kv.count(63) ? std::stod(ob.kv[63]) : 0.0;
+            for (int ti : inGroup[target]) q.push({e.t + d, seq++, ti});
+        }
+        if (!q.empty() && q.top().t == e.t) continue;
+        std::vector<int> vis;
+        for (int i = 0; i < N; ++i) if (op(baseGroup + i) == 1) vis.push_back(i);
+        log.push_back({e.t, vis});
+    }
+    for (int rep = 0; rep < 2; ++rep) {
+        double ti = rep * plan.total;
+        for (int i = 0; i < N; ++i) {
+            std::vector<int> vis;
+            for (auto& [t, v] : log) if (t <= ti + 1e-9) vis = v;
+            if (vis != std::vector<int>{i}) { why = "rep " + std::to_string(rep) + " frame " + std::to_string(i); return false; }
+            ti += plan.delay[size_t(i)];
+        }
+    }
+    return true;
 }
 
 int main(int argc, char** argv) {
@@ -42,55 +89,30 @@ int main(int argc, char** argv) {
         auto objs = parse(s);
         const int N = plan.count();
 
-        // --- simulacion
-        std::map<int,int> opacity;                        // grupo -> 0/1 (por defecto 1)
-        auto op = [&](int gid) { return opacity.count(gid) ? opacity[gid] : 1; };
-        std::map<int,std::vector<int>> inGroup;           // grupo -> triggers
-        for (int i = 0; i < int(objs.size()); ++i) {
-            int id = std::stoi(objs[i].kv[1]);
-            if (id == 1007 || id == 1268) for (int gg : objs[i].groups) inGroup[gg].push_back(i);
-        }
-        struct Ev { double t; int seq; int obj; bool operator<(const Ev& o) const { return t > o.t || (t == o.t && seq > o.seq); } };
-        std::priority_queue<Ev> q; int seq = 0;
-        for (int i = 0; i < int(objs.size()); ++i) {
-            int id = std::stoi(objs[i].kv[1]);
-            if (id == 1268 && !objs[i].kv.count(62)) q.push({0, seq++, i});     // de posicion: t = 0
-        }
-        // registro de visibilidad: tras cada evento anotamos que frames son visibles
-        std::vector<std::pair<double,std::vector<int>>> log;
-        const double tEnd = plan.total * 2.5;
-        while (!q.empty() && q.top().t <= tEnd) {
-            Ev e = q.top(); q.pop();
-            Obj& ob = objs[size_t(e.obj)]; int id = std::stoi(ob.kv[1]);
-            int target = std::stoi(ob.kv[51]);
-            if (id == 1007) {
-                opacity[target] = std::stoi(ob.kv[35]);
-            } else {
-                double d = ob.kv.count(63) ? std::stod(ob.kv[63]) : 0.0;
-                for (int ti : inGroup[target]) q.push({e.t + d, seq++, ti});
-            }
-            if (!q.empty() && q.top().t == e.t) continue;   // espera a terminar el instante
-            std::vector<int> vis;
-            for (int i = 0; i < N; ++i) if (op(100 + i) == 1) vis.push_back(i);
-            log.push_back({e.t, vis});
-        }
-        // --- comprobaciones: tras t=0 solo el frame 0; luego el frame i desde t_i; y se repite
-        bool ok = true; double t0 = 0; std::string why;
-        for (int rep = 0; rep < 2 && ok; ++rep) {
-            double ti = rep * plan.total;
-            for (int i = 0; i < N && ok; ++i) {
-                // estado justo despues de t = ti
-                std::vector<int> vis;
-                for (auto& [t, v] : log) if (t <= ti + 1e-9) vis = v;
-                if (vis != std::vector<int>{i}) { ok = false; why = "rep " + std::to_string(rep) + " frame " + std::to_string(i) + " visibles=" + std::to_string(vis.size()) + (vis.empty() ? "" : " primero=" + std::to_string(vis[0])); }
-                ti += plan.delay[size_t(i)];
-            }
-        }
+        bool ok; std::string why;
+        ok = simulate(s, plan, 100, 0, why);
         size_t shapes = 0; for (auto& r : res) shapes += r.shapes.size();
         std::cout << "metodo " << methodIdx << ": frames=" << N << " objetos=" << shapes << " triggers=" << gifTriggerCount(N)
                   << " cadena=" << s.size() / 1024 << "KB loop=" << plan.total << "s  secuencia " << (ok ? "OK" : "FALLA: " + why) << "\n";
         if (!ok) ++fails;
         if (methodIdx == 2) { std::ofstream("tests/out_sample.txt") << s; }
+    }
+    // metodo 18: estatico + parches
+    for (int tr : {1, 2}) {
+        GifPlan plan = planFrames(g, 12, 1.0, 0.02);
+        Options o; o.maxRaster = 256; o.quality = 0; o.lightSpecialChannels = true; o.maxChannels = 0;
+        o.budget = 150;
+        PatchSet ps = convertPatches(g, plan, Method(tr), o, 28, 900, nullptr, 4);
+        GifExportParams p; p.baseGroup = 100; p.eo.longSide = 600;
+        std::string err, why;
+        std::string str = buildGifPatchString(ps, plan, p, &err);
+        if (str.empty()) { std::cout << "FAIL patch build: " << err << "\n"; ++fails; continue; }
+        size_t pobj = 0; for (auto& r : ps.patches) pobj += r.shapes.size();
+        bool ok = simulate(str, plan, 100, int(ps.base.shapes.size()), why);
+        std::cout << "metodo 18 (trazador " << tr << "): base=" << ps.base.shapes.size() << " parches=" << pobj
+                  << " cambia ~" << ps.patchPixels0 * 100 / ps.totalPixels << "% cadena=" << str.size() / 1024 << "KB  secuencia "
+                  << (ok ? "OK" : "FALLA: " + why) << "\n";
+        if (!ok) ++fails;
     }
     // plan con muestreo (menos frames que el GIF)
     GifPlan p6 = planFrames(g, 5, 1.0, 0.02);

@@ -8,7 +8,7 @@
 	},
 	"id": "patasma.gif_importer",
 	"name": "GIF Importer",
-	"version": "v0.1.0-beta",
+	"version": "v0.2.0-beta",
 	"developer": "Patasma",
 	"description": "Importa GIFs animados al editor usando Alpha triggers + Spawn triggers en bucle infinito. Eliges objetos por frame y metodo de imagen (17 metodos). BETA.",
 	"resources": {
@@ -68,6 +68,38 @@
 			"max": 8,
 			"name": "Hilos de calculo",
 			"description": "Frames que se convierten a la vez. Bajalo en moviles lentos."
+		},
+		"title-patch": {
+			"name": "Metodo 18: Estatico + parches",
+			"type": "title"
+		},
+		"patch-tracer": {
+			"type": "string",
+			"default": "BSP",
+			"name": "Trazador de fondo y parches",
+			"one-of": [
+				"BSP",
+				"Quadtree",
+				"Regiones",
+				"Cuadricula"
+			],
+			"description": "Metodo de imagen con el que se trazan el fondo estatico y los parches. <cy>BSP</c> es el recomendado."
+		},
+		"patch-tolerance": {
+			"type": "int",
+			"default": 28,
+			"min": 4,
+			"max": 120,
+			"name": "Tolerancia de cambio",
+			"description": "Diferencia de color (0-255) a partir de la cual un pixel cuenta como \"cambiado\" y entra en el parche. Mas alto = parches mas pequenos (menos objetos) pero movimiento menos fiel. Mas bajo = mas fiel, parches grandes."
+		},
+		"base-multiplier": {
+			"type": "int",
+			"default": 6,
+			"min": 1,
+			"max": 20,
+			"name": "Presupuesto del fondo (x)",
+			"description": "El fondo estatico usa <cy>objetos por frame x este numero</c> (se traza una sola vez, asi que es barato darle mas detalle)."
 		},
 		"title-render": {
 			"name": "Calidad y resultado",
