@@ -1,3 +1,6 @@
+# v0.2.2-beta
+- Fix de compilacion en Windows: `far` y `small` son macros de windows.h; renombrados en layered.hpp.
+
 # v0.2.1-beta
 - Metodo 18: cada capa lleva ahora rectangulos rotados guiados por el error sobre el composite real (mucho mas detalle en contornos y diagonales con los mismos objetos).
 - Metodo 18: los frames casi identicos reutilizan parche; z-order compactado; nuevos ajustes "Rectangulos rotados" y "Reutilizar parches".

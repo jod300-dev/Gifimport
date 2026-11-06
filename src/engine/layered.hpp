@@ -241,12 +241,12 @@ inline void kMedoids(const std::vector<float>& D, int N, int K, std::vector<int>
         for (int i = 0; i < N; ++i) { double s = 0; for (int j = 0; j < N; ++j) s += D[size_t(i) * N + j]; if (s < bs) { bs = s; best = i; } }
         med.push_back(best);
         while (int(med.size()) < K) {
-            int far = -1; double fd2 = -1;
+            int farIdx = -1; double fd2 = -1;
             for (int i = 0; i < N; ++i) {
                 double m = 1e300; for (int c : med) m = std::min(m, double(D[size_t(i) * N + c]));
-                if (m > fd2) { fd2 = m; far = i; }
+                if (m > fd2) { fd2 = m; farIdx = i; }
             }
-            med.push_back(far);
+            med.push_back(farIdx);
         }
     }
     as.assign(size_t(N), 0);
@@ -515,8 +515,8 @@ inline LayeredAnim buildLayered(const GifData& g, const GifPlan& plan, const Opt
     //     coste de una capa  ~  area x sqrt(frames en los que se ve)   (tasa-distorsion: densidad de objetos ~ sqrt(tiempo visible))
     int sw, sh; fitSize(W, H, 96, sw, sh);
     const double sc = double(W) * H / (double(sw) * sh);
-    std::vector<Image> small; small.resize(size_t(N));
-    lay::parallelFor(N, threads, [&](int i) { small[size_t(i)] = lay::blur3(resizeArea(fr[size_t(i)], sw, sh), thr); });
+    std::vector<Image> lowRes; lowRes.resize(size_t(N));
+    lay::parallelFor(N, threads, [&](int i) { lowRes[size_t(i)] = lay::blur3(resizeArea(fr[size_t(i)], sw, sh), thr); });
     const Image smallMed = lay::blur3(resizeArea(med, sw, sh), thr);
     auto areaOf = [&](const Image& t, const Image& c) {
         auto m = lay::changeMask(t, c, tol, 0, thr);
@@ -524,7 +524,7 @@ inline LayeredAnim buildLayered(const GifData& g, const GifPlan& plan, const Opt
         return double(n) * sc;
     };
     std::vector<double> a0; a0.assign(size_t(N), 0.0);                       // parche de cada frame directamente sobre el still
-    lay::parallelFor(N, threads, [&](int i) { a0[size_t(i)] = areaOf(small[size_t(i)], smallMed); });
+    lay::parallelFor(N, threads, [&](int i) { a0[size_t(i)] = areaOf(lowRes[size_t(i)], smallMed); });
     report(prog, 0.1f);
 
     const std::vector<float> D = lay::frameDistances(fr);
@@ -536,7 +536,7 @@ inline LayeredAnim buildLayered(const GifData& g, const GifPlan& plan, const Opt
         std::vector<double> a1; a1.assign(size_t(N), 0.0);
         lay::parallelFor(N, threads, [&](int i) {
             const int m = pl.med[size_t(pl.as[size_t(i)])];
-            a1[size_t(i)] = (i == m) ? 0.0 : areaOf(small[size_t(i)], small[size_t(m)]);
+            a1[size_t(i)] = (i == m) ? 0.0 : areaOf(lowRes[size_t(i)], lowRes[size_t(m)]);
         });
         for (int k = 0; k < KK; ++k) {
             double with = a0[size_t(pl.med[size_t(k)])], wo = 0; int n = 0;
@@ -582,7 +582,7 @@ inline LayeredAnim buildLayered(const GifData& g, const GifPlan& plan, const Opt
             if (thrArea > 0) {
                 for (int j : keepers) {
                     if (A.restOf[size_t(j)] != A.restOf[size_t(i)]) continue;
-                    double ar = areaOf(small[size_t(i)], small[size_t(j)]);
+                    double ar = areaOf(lowRes[size_t(i)], lowRes[size_t(j)]);
                     if (ar <= bestA) { bestA = ar; bestJ = j; }
                 }
             }
