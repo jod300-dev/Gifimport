@@ -164,7 +164,11 @@ void GifPopup::refreshLabels() {
     m_methodLabel->limitLabelWidth(210.f, 0.5f, 0.2f);
 
     char buf[64];
-    std::snprintf(buf, sizeof buf, "%d", m_perFrame);
+    {   // si el "Tope total de objetos" recorta el presupuesto, se muestra el valor que de verdad se aplica
+        int eff = m_gif ? effectivePerFrame(makePlan().count()) : m_perFrame;
+        if (eff < m_perFrame) std::snprintf(buf, sizeof buf, "%d (tope: %d)", m_perFrame, eff);
+        else std::snprintf(buf, sizeof buf, "%d", m_perFrame);
+    }
     m_perFrameValue->setString(buf);
     std::snprintf(buf, sizeof buf, "%d u (%.1f bloques)", m_sizeU, m_sizeU / 30.0);
     m_sizeValue->setString(buf);

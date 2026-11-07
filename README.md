@@ -60,8 +60,22 @@ g++ -O2 -std=c++20 -pthread -Iinclude -Isrc/engine tests/layered_test.cpp -o lay
 ```
 Calcula las capas, genera la cadena de GD, **simula los triggers**, rasteriza los objetos visibles de cada frame (2 vueltas del bucle), mide el PSNR contra el GIF y lo compara con el metodo normal (BSP) con el mismo numero de objetos.
 
+## Errores conocidos y como se evitan
+Analisis de lo visto en el juego (preview limpio, pero astillas / frames "amalgamados" al colocar). Cada punto tiene prueba automatica en `tests/sanity_test.cpp` (comprobada contra el codigo anterior: detecta el fallo).
+
+| Error | Causa | Arreglo |
+|---|---|---|
+| Astillas / halo alrededor de la imagen (metodos 7, 8, 9, 10, 12, 15, 16, 17, 18, 19) | Rectangulos girados que se salian del lienzo (hasta ~68 px). El preview los recortaba; GD **no**. | `Geo` ya no genera formas que sobresalgan (las alineadas a ejes se recortan) y `sanitizeResult` (`src/engine/sanitize.hpp`) confina **todo** resultado en `convert()`: unico punto de entrada de todos los metodos. |
+| z-order con ~1000 valores distintos (metodos 7/8) | Un z por forma | Compactado a la profundidad real de solapamiento (16-20 valores). |
+| Frames "amalgamados" en el editor | El editor no ejecuta triggers: todos los frames se ven apilados | El **frame 0 se dibuja encima** (z mayor): el editor muestra el frame 0 limpio. En el juego solo hay un frame visible a la vez, asi que no cambia nada. (En 18/19 el editor muestra las capas apiladas: es lo esperado.) |
+| "Pido 3000 y sale como 1150" | El **Tope total de objetos** (40000 por defecto) recorta los objetos por frame en silencio | La ventana muestra el valor aplicado: `3000 (tope: 1176)`. Sube el tope en ajustes si lo necesitas. |
+
+Notas: la calidad sube de forma continua con el presupuesto (medido de 500 a 4000 objetos/frame en todos los metodos): no hay valores "buenos" y "malos". Con *Lado largo* pequeno (p. ej. 210 u) los objetos miden <1 unidad: sube el lado largo si se ve borroso.
+
+Regla para metodos futuros: pasar siempre por `convert()` (o llamar a `sanitizeResult`), y ejecutar `tests/sanity_test.cpp`.
+
 ## NO verificado
 * `src/ui` y `src/main.cpp` **no se han compilado ni probado en el juego** (incluidas las ramas nuevas del metodo 18; el motor `layered.hpp` si esta probado) (se escribieron contra el patron del Image Exporter). Puede pedir algun ajuste menor.
 * Las claves de triggers (Alpha 1007: 51/35/10; Spawn 1268: 51/63/62/87; grupos 57) siguen el formato estandar de 2.2 pero no estan probadas en GD.
-* Cada frame se convierte por separado: puede haber parpadeo entre frames. Sube los objetos por frame para reducirlo.
+* Cada frame se convierte por separado (metodos 1-17): puede haber parpadeo entre frames. Los metodos 18 y 19 lo reducen mucho (fondo trazado una vez).
 * Retardos < 0.03 s se suben a 0.03 s (ajustable).

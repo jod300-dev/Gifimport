@@ -68,11 +68,14 @@ inline std::string buildGifStringCh(const std::vector<Result>& results, const Gi
     for (auto& r : results) total += r.shapes.size();
     if (total == 0) return fail("Ningun frame genero objetos");
     out.reserve(total * 100 + size_t(gifTriggerCount(N) + int(palette.size())) * 90);
+    int zSpan = 1;                                           // frame 0 encima de los demas (editor limpio; en el juego no importa)
+    for (auto& r : results) for (auto& sh : r.shapes) zSpan = std::max<int>(zSpan, sh.z + 1);
     for (int i = 0; i < N; ++i) {
         const Result& r = results[size_t(i)];
         if (r.shapes.empty()) continue;
         GdExportOptions eo = p.eo;
         eo.groupStr = std::to_string(G0 + i);
+        eo.zBase = p.eo.zBase + (i == 0 ? zSpan : 0);
         eo.monoFastPath = false;
         ChannelMap cm = buildChannelMap(r);                          // orden de aparicion de los colores de ESTE frame -> canal global
         eo.channels.assign(cm.colors.size(), 0);

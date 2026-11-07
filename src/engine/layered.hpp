@@ -417,34 +417,6 @@ inline std::vector<std::array<uint8_t, 3>> buildPalette(const std::map<uint32_t,
     return out;
 }
 
-// Compacta el z-order a la PROFUNDIDAD REAL de solapamiento: dos formas que no se tocan comparten z. El resultado visual es
-// identico (el orden relativo de las que si se solapan se conserva) pero en vez de miles de z distintos quedan unas decenas.
-inline void compactZ(std::vector<Shape>& shapes, int W, int H) {
-    if (shapes.size() < 2) { for (auto& s : shapes) s.z = 0; return; }
-    std::vector<size_t> ord(shapes.size());
-    for (size_t i = 0; i < ord.size(); ++i) ord[i] = i;
-    std::stable_sort(ord.begin(), ord.end(), [&](size_t a, size_t b) { return shapes[a].z < shapes[b].z; });
-    std::vector<uint16_t> pd(size_t(W) * H, 0);
-    std::vector<uint16_t> depth(shapes.size(), 1);
-    for (size_t oi : ord) {
-        const Shape& s = shapes[oi];
-        const double rad = s.rot * 3.14159265358979323846 / 180.0, cs = std::cos(rad), sn = std::sin(rad);
-        const double hx = s.w * 0.5, hy = s.h * 0.5;
-        const double ex = std::abs(hx * cs) + std::abs(hy * sn), ey = std::abs(hx * sn) + std::abs(hy * cs);
-        int x0 = std::max(0, int(std::floor(s.cx - ex - 0.5))), x1 = std::min(W - 1, int(std::ceil(s.cx + ex + 0.5)));
-        int y0 = std::max(0, int(std::floor(s.cy - ey - 0.5))), y1 = std::min(H - 1, int(std::ceil(s.cy + ey + 0.5)));
-        auto inside = [&](int x, int y) {
-            double dx = x + 0.5 - s.cx, dy = y + 0.5 - s.cy, lx = dx * cs + dy * sn, ly = -dx * sn + dy * cs;
-            return lx >= -hx - 1e-4 && lx < hx + 1e-4 && ly >= -hy - 1e-4 && ly < hy + 1e-4;
-        };
-        uint16_t d = 1;
-        for (int y = y0; y <= y1; ++y) for (int x = x0; x <= x1; ++x) if (inside(x, y)) d = std::max<uint16_t>(d, uint16_t(pd[size_t(y) * W + x] + 1));
-        for (int y = y0; y <= y1; ++y) for (int x = x0; x <= x1; ++x) if (inside(x, y)) pd[size_t(y) * W + x] = d;
-        depth[oi] = d;
-    }
-    for (size_t i = 0; i < shapes.size(); ++i) shapes[i].z = int16_t(std::min<int>(depth[i] - 1, 32000));
-}
-
 // Capa = base BSP + rectangulos rotados colocados por busqueda guiada por el error, DIRECTAMENTE sobre lo que ya se ve
 // (lazo cerrado). Despues se recolorea cada forma con lo que realmente queda visible, se quitan las tapadas y ese
 // presupuesto se reinvierte. `layerImg` = lo que debe cubrir la capa (con huecos); `target` = el frame completo (opaco);
@@ -485,6 +457,7 @@ inline Result traceHybrid(const Image& layerImg, const Image& target, const Imag
     }
     refitVisible(out.shapes, target, 255, true);
     if (int(out.shapes.size()) > budget) out.shapes.resize(size_t(budget));
+    confineShapes(out.shapes, W, H);
     compactZ(out.shapes, W, H);
     return out;
 }

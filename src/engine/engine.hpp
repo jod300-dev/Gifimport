@@ -6,6 +6,7 @@
 #include "partition.hpp"
 #include "regions.hpp"
 #include "geometrize.hpp"
+#include "sanitize.hpp"
 #include "mono.hpp"
 
 namespace gdx {
@@ -58,7 +59,7 @@ inline const MethodInfo& methodInfo(Method m) {
 }
 
 // Convierte la imagen a formas con el método indicado. Garantiza shapes.size() + textRows.size() <= opt.budget.
-inline Result convert(const Image& srcIn, Method method, const Options& opt, Progress* prog = nullptr) {
+inline Result convertImpl(const Image& srcIn, Method method, const Options& opt, Progress* prog) {
     Result res;
     double t0 = nowMs();
     Options o = opt;
@@ -182,6 +183,13 @@ inline Result convert(const Image& srcIn, Method method, const Options& opt, Pro
     res.ms = nowMs() - t0;
     report(prog, 1.f);
     return res;
+}
+
+// Punto de entrada UNICO: convierte y aplica el saneado comun (formas dentro del lienzo, z-order compacto).
+inline Result convert(const Image& srcIn, Method method, const Options& opt, Progress* prog = nullptr) {
+    Result r = convertImpl(srcIn, method, opt, prog);
+    sanitizeResult(r);
+    return r;
 }
 
 } // namespace gdx

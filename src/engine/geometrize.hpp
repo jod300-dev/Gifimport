@@ -127,7 +127,25 @@ private:
         }
     }
 
+    // Una forma girada NUNCA debe sobresalir del lienzo (en GD no se recorta: se veria como una astilla fuera de la imagen).
+    bool fits(const Cand& c) const {
+        const double rad = c.rot * 3.14159265358979323846 / 180.0, cs = std::cos(rad), sn = std::sin(rad), hx = c.w * 0.5, hy = c.h * 0.5;
+        const double ex = std::abs(hx * cs) + std::abs(hy * sn), ey = std::abs(hx * sn) + std::abs(hy * cs);
+        return c.cx - ex >= -0.25 && c.cx + ex <= W + 0.25 && c.cy - ey >= -0.25 && c.cy + ey <= H + 0.25;
+    }
+    // Las alineadas a ejes (0/90 grados) SI pueden llegar al borde: se recortan al lienzo.
+    void clipAxis(Cand& c) const {
+        double a = std::fmod(std::abs(double(c.rot)), 90.0);
+        if (!(a < 0.05 || a > 89.95)) return;
+        const bool swap = std::fmod(std::abs(double(c.rot)), 180.0) > 45.0 && std::fmod(std::abs(double(c.rot)), 180.0) < 135.0;
+        float ex = (swap ? c.h : c.w) * 0.5f, ey = (swap ? c.w : c.h) * 0.5f;
+        float x0 = std::max(0.f, c.cx - ex), x1 = std::min(float(W), c.cx + ex), y0 = std::max(0.f, c.cy - ey), y1 = std::min(float(H), c.cy + ey);
+        if (x1 - x0 < 0.5f || y1 - y0 < 0.5f) return;
+        c.cx = (x0 + x1) * 0.5f; c.cy = (y0 + y1) * 0.5f;
+        (swap ? c.h : c.w) = x1 - x0; (swap ? c.w : c.h) = y1 - y0;
+    }
     Ev eval(const Cand& c) const {
+        if (!fits(c)) return Ev{};
         double n = 0, sr = 0, sg = 0, sb = 0, stt = 0, se = 0;
         forSpans(c, [&](int y, int xs, int xe) {
             const Px* p = &px[size_t(y) * W + xs];
@@ -173,6 +191,8 @@ private:
         float lmin = std::log(minS), lmax = std::log(maxS);
         c.w = std::exp(rng.range(lmin, lmax)); c.h = std::exp(rng.range(lmin, lmax));
         c.rot = rng.range(0.f, 180.f);
+        if (rng.f() < 0.2f) c.rot = 0.f;                                  // algunas alineadas a ejes: pueden cubrir hasta el borde
+        clipAxis(c);
         return c;
     }
 
@@ -186,6 +206,7 @@ private:
         }
         c.cx = std::clamp(c.cx, 0.f, float(W)); c.cy = std::clamp(c.cy, 0.f, float(H));
         c.w = std::min(c.w, 2.f * L); c.h = std::min(c.h, 2.f * L);
+        clipAxis(c);
         return c;
     }
 };

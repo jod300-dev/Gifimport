@@ -181,12 +181,18 @@ inline std::string buildGifString(const std::vector<Result>& results, const GifP
     if (total == 0) return fail("Ningun frame genero objetos");
     out.reserve(total * 100 + size_t(gifTriggerCount(N)) * 90);
 
+    // El editor no ejecuta triggers: todos los frames se ven apilados. El frame 0 va ENCIMA (z-order mayor) para que en el
+    // editor se vea limpio; en el juego solo hay un frame visible a la vez, asi que el orden entre frames no importa.
+    int zSpan = 1;
+    for (auto& r : results) for (auto& sh : r.shapes) zSpan = std::max<int>(zSpan, sh.z + 1);
+
     // --- objetos de cada frame, cada uno en su grupo G_i
     for (int i = 0; i < N; ++i) {
         const Result& r = results[size_t(i)];
         if (r.shapes.empty()) continue;
         GdExportOptions eo = p.eo;
         eo.groupStr = std::to_string(G0 + i);
+        eo.zBase = p.eo.zBase + (i == 0 ? zSpan : 0);
         eo.monoFastPath = r.mono && !r.colored;
         std::string s = toGdString(r, eo);
         if (s.empty()) continue;
