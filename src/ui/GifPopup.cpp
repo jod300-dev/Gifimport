@@ -10,7 +10,7 @@ namespace {
     constexpr float kPopupW = 430.f, kPopupH = 290.f;
     constexpr float kPrevSize = 140.f;
     constexpr int kMethodCount = int(gdx::Method::Ascii);          // metodos 1-17 (el ASCII no sirve para animar)
-    constexpr int kMethodTotal = kMethodCount + 1;                 // + el metodo 18 (capas)
+    constexpr int kMethodTotal = kMethodCount + 2;                 // + metodo 18 (capas) y 19 (arbol de deltas)
     constexpr int kMinPF = 10, kMaxPF = 5000;                      // objetos por frame
     constexpr int kMinFrames = 2, kMaxFrames = 300;
     constexpr int kMinSize = 150, kMaxSize = 6000;
@@ -65,6 +65,7 @@ bool GifPopup::init(EditorUI* editor) {
     m_sizeU = std::clamp(mod->getSavedValue<int>("size-u", 600), kMinSize, kMaxSize);
     m_maxFrames = std::clamp(mod->getSavedValue<int>("max-frames", 40), kMinFrames, kMaxFrames);
     m_gray = mod->getSavedValue<bool>("gray", false);
+    m_chan = mod->getSavedValue<bool>("chan", false);                // HSV por defecto
 
     auto put = [&](CCNode* n, float x, float y) { m_mainLayer->addChildAtPosition(n, Anchor::TopLeft, ccp(x, -y)); };
     auto putBtn = [&](CCNode* n, float x, float y) { m_buttonMenu->addChildAtPosition(n, Anchor::TopLeft, ccp(x, -y)); };
@@ -130,6 +131,10 @@ bool GifPopup::init(EditorUI* editor) {
     m_chkGray->toggle(m_gray);
     putBtn(m_chkGray, 174.f, 224.f);
     label("Escala de grises", "bigFont.fnt", 0.28f, 186.f, 224.f, 0.f);
+    m_chkChan = CCMenuItemToggler::createWithStandardSprites(this, menu_selector(GifPopup::onChan), 0.5f);
+    m_chkChan->toggle(m_chan);
+    putBtn(m_chkChan, 300.f, 224.f);
+    if (auto* l = label("Canales (sin HSV)", "bigFont.fnt", 0.28f, 312.f, 224.f, 0.f)) l->limitLabelWidth(106.f, 0.28f, 0.15f);
 
     auto pickBtn = CCMenuItemSpriteExtra::create(ButtonSprite::create("GIF", "bigFont.fnt", "GJ_button_01.png", 0.6f), this, menu_selector(GifPopup::onPick));
     putBtn(pickBtn, 226.f, 258.f);
@@ -149,8 +154,8 @@ bool GifPopup::init(EditorUI* editor) {
 
 void GifPopup::refreshLabels() {
     if (layered()) {
-        m_methodLabel->setString(gdx::layeredName());
-        m_descLabel->setString(gdx::layeredDesc());
+        m_methodLabel->setString(treeMode() ? gdx::treeName() : gdx::layeredName());
+        m_descLabel->setString(treeMode() ? gdx::treeDesc() : gdx::layeredDesc());
     } else {
         auto const& info = gdx::methodInfo(method());
         m_methodLabel->setString(info.name);
@@ -173,6 +178,7 @@ void GifPopup::refreshLabels() {
     mod->setSavedValue<int>("size-u", m_sizeU);
     mod->setSavedValue<int>("max-frames", m_maxFrames);
     mod->setSavedValue<bool>("gray", m_gray);
+    mod->setSavedValue<bool>("chan", m_chan);
 }
 
 void GifPopup::setStatus(std::string const& a, std::string const& b, std::string const& note) {
@@ -213,6 +219,18 @@ void GifPopup::onGray(CCObject*) {
     m_gray = !m_gray;                           // en el callback el toggler aun no ha cambiado su estado
     this->refreshLabels();
     this->scheduleRecompute();
+}
+
+// Check "Canales (sin HSV)": los objetos usan solo canales de color (2..), nunca el 1, con Color triggers al inicio.
+void GifPopup::onChan(CCObject*) {
+    m_chan = !m_chan;                           // en el callback el toggler aun no ha cambiado su estado
+    this->refreshLabels();
+    if (layered()) this->scheduleRecompute();   // 18/19: las capas se recalculan con la paleta
+    else if (m_hasResult && !m_build) this->applyPreview(nullptr);
+}
+
+int GifPopup::paletteSize() const {
+    return std::clamp(int(Mod::get()->getSettingValue<int>("layered-palette-size")), 8, 900);
 }
 
 void GifPopup::onSettings(CCObject*) {
@@ -305,12 +323,13 @@ gdx::LayeredOptions GifPopup::makeLayeredOptions() const {
     auto* mod = Mod::get();
     gdx::LayeredOptions lo;
     lo.perFrame = m_perFrame;
+    lo.tree = treeMode();
     lo.maxTotal = maxTotal();
     lo.tol = std::clamp(int(mod->getSettingValue<int>("layered-tolerance")), 8, 80);
     lo.denoise = mod->getSettingValue<bool>("layered-denoise");
     lo.painter = mod->getSettingValue<bool>("layered-rotated") ? 1 : 0;
-    lo.channels = mod->getSettingValue<bool>("layered-channels") ? std::clamp(int(mod->getSettingValue<int>("layered-palette-size")), 8, 900) : 0;
-    lo.firstChannel = std::clamp(int(mod->getSettingValue<int>("layered-first-channel")), 2, 900);   // el canal 1 nunca se usa
+    lo.channels = m_chan ? paletteSize() : 0;                       // sin el check: HSV
+    lo.firstChannel = gdx::kFirstColorChannel;                      // siempre desde el 2: el canal 1 nunca se usa
     lo.reuse = float(std::clamp(mod->getSettingValue<double>("layered-reuse"), 0.0, 10.0) / 100.0);
     return lo;
 }
@@ -329,8 +348,9 @@ std::string GifPopup::layeredKey() const {
     key += mod->getSettingValue<bool>("layered-rotated") ? "|r1|" : "|r0|";
     key += std::to_string(mod->getSettingValue<double>("layered-reuse"));
     key += "|" + mod->getSettingValue<std::string>("quality");
-    key += mod->getSettingValue<bool>("layered-channels") ? "|c" : "|h";
-    key += std::to_string(mod->getSettingValue<int>("layered-palette-size")) + "," + std::to_string(mod->getSettingValue<int>("layered-first-channel"));
+    key += treeMode() ? "|T" : "|L";
+    key += m_chan ? "|c" : "|h";
+    key += std::to_string(paletteSize());
     return key;
 }
 
@@ -375,8 +395,8 @@ void GifPopup::recompute(float) {
                                                std::max(1u, std::thread::hardware_concurrency())));
         std::thread([job, lo, threads]() {
             try {
-                job->layered = std::make_shared<gdx::LayeredAnim>(gdx::buildLayered(*job->gif, job->plan, job->opt, lo, &job->prog, threads));
-                if (job->layered->ok()) job->result = gdx::layeredFrameResult(*job->layered, 0);
+                job->layered = std::make_shared<gdx::LayeredAnim>(gdx::buildAnim(*job->gif, job->plan, job->opt, lo, &job->prog, threads));
+                if (job->layered->ok()) job->result = gdx::animFrameResult(*job->layered, 0);
                 else job->result.note = job->layered->note.empty() ? "No se pudieron calcular las capas" : job->layered->note;
             } catch (...) {
                 job->result = gdx::Result{};
@@ -443,11 +463,13 @@ void GifPopup::applyPreview(std::shared_ptr<PreviewJob> job) {
     if (layered()) {
         if (!m_layered) return;
         auto const& A = *m_layered;
-        size_t objs = A.objectCount() + size_t(gdx::layeredTriggerCount(A));
+        size_t objs = A.objectCount() + size_t(gdx::animTriggerCount(A));
         char a2[96], b2[96];
         std::snprintf(a2, sizeof a2, "%d frames | %zu objetos", A.frames, objs);
         if (!A.palette.empty())
-            std::snprintf(b2, sizeof b2, "%d rests | %.1f dB | canales %d-%d", int(A.rests.size()), A.psnrAvg, A.firstChannel, A.firstChannel + int(A.palette.size()) - 1);
+            std::snprintf(b2, sizeof b2, "%s | %.1f dB | canales %d-%d", A.tree ? "arbol" : "rests", A.psnrAvg, A.firstChannel, A.firstChannel + int(A.palette.size()) - 1);
+        else if (A.tree)
+            std::snprintf(b2, sizeof b2, "arbol prof. %d | %.1f dB | %.1f s", A.depthMax, A.psnrAvg, m_layeredPlan.total);
         else
             std::snprintf(b2, sizeof b2, "%d rests | %.1f dB | %.1f s", int(A.rests.size()), A.psnrAvg, m_layeredPlan.total);
         this->setStatus(a2, b2, m_result.note);
@@ -460,7 +482,7 @@ void GifPopup::applyPreview(std::shared_ptr<PreviewJob> job) {
     int pf = effectivePerFrame(n);
     size_t kb0 = gdx::toGdString(m_result, makeExportOptions()).size() / 1024;
     size_t objs0 = m_result.shapes.size();
-    size_t totalObjs = objs0 * size_t(n) + size_t(gdx::gifTriggerCount(n));
+    size_t totalObjs = objs0 * size_t(n) + size_t(gdx::gifTriggerCount(n)) + (m_chan ? size_t(paletteSize()) : size_t(0));
     char a1[96], b1[96];
     std::snprintf(a1, sizeof a1, "%d frames | ~%zu objetos", n, totalObjs);
     std::snprintf(b1, sizeof b1, "~%zu KB | %.1f s de bucle", kb0 * size_t(n) + size_t(n) * 2, plan.total);
@@ -585,7 +607,7 @@ void GifPopup::onPlace(CCObject*) {
         this->setStatus("Calculando capas... 0%", "No cierres la ventana");
         std::thread([job, lo]() {
             try {
-                job->layered = std::make_shared<gdx::LayeredAnim>(gdx::buildLayered(*job->gif, job->plan, job->opt, lo, &job->prog, job->threads));
+                job->layered = std::make_shared<gdx::LayeredAnim>(gdx::buildAnim(*job->gif, job->plan, job->opt, lo, &job->prog, job->threads));
             } catch (...) {
                 job->layered = nullptr;
             }
@@ -600,9 +622,12 @@ void GifPopup::onPlace(CCObject*) {
     this->unschedule(schedule_selector(GifPopup::recompute));
     this->setStatus("Convirtiendo frames... 0%", "No cierres la ventana");
 
+    job->useCh = m_chan;
+    job->paletteK = paletteSize();
     std::thread([job]() {
         try {
             job->results = gdx::convertFrames(*job->gif, job->plan, job->method, job->opt, &job->prog, job->threads);
+            if (job->useCh && !job->results.empty()) job->palette = gdx::quantizeFrames(job->results, job->paletteK);   // paleta comun, canales desde el 2
         } catch (...) {
             job->results.clear();
         }
@@ -633,8 +658,9 @@ void GifPopup::finishBuild(std::shared_ptr<BuildJob> job) {
     std::string err;
     const bool isLay = job->layered != nullptr;
     if (isLay && !job->layered->ok() && err.empty()) err = "No se pudieron calcular las capas";
-    std::string str = isLay ? (job->layered->ok() ? gdx::buildLayeredString(*job->layered, job->plan, p, &err) : std::string())
-                            : gdx::buildGifString(job->results, job->plan, p, &err);
+    std::string str = isLay ? (job->layered->ok() ? gdx::buildAnimString(*job->layered, job->plan, p, &err) : std::string())
+                            : (job->useCh ? gdx::buildGifStringCh(job->results, job->plan, p, job->palette, &err)
+                                          : gdx::buildGifString(job->results, job->plan, p, &err));
     if (str.empty()) {
         FLAlertLayer::create("GIF Importer", err.empty() ? "No se pudo generar el GIF." : err.c_str(), "OK")->show();
         this->applyPreview(nullptr);
@@ -643,11 +669,11 @@ void GifPopup::finishBuild(std::shared_ptr<BuildJob> job) {
 
     size_t shapes = 0;
     for (auto& r : job->results) shapes += r.shapes.size();
-    size_t count = shapes + size_t(gdx::gifTriggerCount(N));
+    size_t count = shapes + size_t(gdx::gifTriggerCount(N)) + (job->useCh && !isLay ? job->palette.size() : size_t(0));   // + 1 Color trigger por canal
     int groupCount = gdx::gifGroupCount(N);
     if (isLay) {
-        count = job->layered->objectCount() + size_t(gdx::layeredTriggerCount(*job->layered));
-        groupCount = gdx::layeredGroupCount(*job->layered);
+        count = job->layered->objectCount() + size_t(gdx::animTriggerCount(*job->layered));
+        groupCount = gdx::animGroupCount(*job->layered);
     }
     CCArray* created = lel->createObjectsFromString(str.c_str(), true, true);
     if (created && created->count() > 0 && mod->getSettingValue<bool>("select-after") && m_editor) {
@@ -670,6 +696,7 @@ void GifPopup::onInfo(CCObject*) {
         "- <cg>Objetos por frame</c>: presupuesto de cada frame (se recorta si pasas del tope total de los ajustes).\n"
         "- <cg>Frames maximos</c>: si el GIF tiene mas, se reparten de forma uniforme y se conserva la duracion.\n"
         "- En el editor los frames se ven superpuestos: <cy>dale a jugar</c> para ver la animacion.\n"
+        "- <cg>Metodo 19 (arbol de deltas)</c>: cada frame se predice del <cy>frame mas parecido</c> y solo pinta lo que cambia; lo mostrado es el camino fondo -> frame. Es el de mas calidad por objeto.\n"
         "- <cg>Metodo 18 (capas)</c>: lo quieto se traza <cy>una sola vez</c>, mas unas poses de reposo y, por frame, <cy>solo lo que cambia</c>. \"Objetos por frame\" x frames es el total que se reparte entre las capas: mas nitidez con los mismos objetos.\n"
         "- Los triggers de arranque van en x=-30 (inicio del nivel); cambialo en Ajustes.\n"
         "No se puede deshacer: <cr>guarda antes</c>.",

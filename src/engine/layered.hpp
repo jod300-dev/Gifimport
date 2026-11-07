@@ -50,6 +50,7 @@ struct LayeredOptions {
     float reuse = 0.005f;     // un frame reutiliza el parche de otro (mismo rest) si difieren en menos de esta fraccion del lienzo (0 = no reutilizar)
     float stillBsp = 0.55f;   // idem para el fondo (el fondo es grande y regular: mas BSP)
     float bspFrac = 0.15f;    // fraccion del presupuesto de cada capa que usa la base BSP (el resto: rectangulos rotados)
+    bool tree = false;        // metodo 19: arbol de deltas (cada frame se predice del frame mas parecido, no de un rest fijo)
     int channels = 0;         // >0: colores en CANALES (sin HSV): paleta de hasta este numero de colores; 0 = HSV
     int firstChannel = 2;     // primer canal de la paleta (el canal 1 NUNCA se usa)
     bool denoise = true;      // mediana 3x3 antes de trazar (quita el dither del GIF; el PSNR se mide contra el original)
@@ -68,6 +69,10 @@ struct LayeredAnim {
     double psnrAvg = 0, psnrMin = 0;
     std::vector<std::array<uint8_t, 3>> palette;   // colores de canal usados (vacio = HSV); el canal de palette[i] es firstChannel + i
     int firstChannel = 2;
+    bool tree = false;                  // metodo 19: `patches[i]` = delta del frame i sobre el composite de `parent[i]`
+    std::vector<int> parent;            // (solo arbol) frame padre; -1 = el fondo (still)
+    std::vector<int> zNode;             // (solo arbol) z base de la delta de cada frame
+    int depthMax = 0;
     int zRest = 1, zPatch = 2;          // z-order base de los rests y los parches (encima de las formas de la capa de abajo)
     int budgetTotal = 0;                // objetos de capas que se podian repartir
     int restCandidates = 0;             // K probados al elegir el numero de rests (info)

@@ -1,3 +1,11 @@
+# v0.4.1-beta
+- Nuevo check "Canales (sin HSV)" junto a "Escala de grises": colores solo en canales en los 19 metodos (paleta comun + Color triggers; el canal 1 nunca se usa, siempre desde el 2). Apagado por defecto: HSV en todos los modos.
+- Ajustes eliminados (sustituidos por el check): "Colores en canales" y "Primer canal de color".
+
+# v0.4.0-beta
+- Metodo 19 (arbol de deltas): cada frame se predice del frame mas parecido y solo pinta lo que cambia (arbol de expansion minima, lazo cerrado, dos pasadas). Mas calidad por objeto que el 18.
+- core.hpp / resto del motor sin cambios.
+
 # v0.3.0-beta
 - Metodo 18: colores en canales (sin HSV) con paleta comun y Color triggers al inicio; el canal 1 nunca se usa. Ajustes: colores en canales, tamano de paleta, primer canal.
 

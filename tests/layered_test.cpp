@@ -2,10 +2,10 @@
 // rasteriza los objetos visibles en cada frame y mide el PSNR contra el GIF original.
 // Tambien compara con el metodo normal (un frame = un grupo) usando el mismo numero total de objetos.
 //   g++ -O2 -std=c++20 -pthread -Iinclude -Isrc/engine tests/layered_test.cpp -o layered_test
-//   ./layered_test tests/test.gif [maxFrames] [objetosPorFrame] [inner 0|1|2] [rests] [tol] [denoise 0|1] [timeExp] [painter 0|1] [bspFrac] [reuse] [stillBsp] [quality] [canales] [primerCanal]
+//   ./layered_test tests/test.gif [maxFrames] [objetosPorFrame] [inner] [rests] [tol] [denoise] [timeExp] [painter] [bspFrac] [reuse] [stillBsp] [quality] [canales] [primerCanal] [arbol 0|1]
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_NO_STDIO
-#include "layered.hpp"
+#include "deltatree.hpp"
 #include <array>
 #include <fstream>
 #include <iostream>
@@ -42,7 +42,7 @@ int main(int argc, char** argv) {
     LayeredOptions lo; lo.perFrame = argc > 3 ? std::atoi(argv[3]) : 300;
     lo.inner = argc > 4 ? std::atoi(argv[4]) : 0; lo.restCount = argc > 5 ? std::atoi(argv[5]) : 0;
     if (argc > 6) lo.tol = std::atoi(argv[6]);
-    lo.maxTotal = 150000; if (argc > 7) lo.denoise = std::atoi(argv[7]) != 0; if (argc > 8) lo.timeExp = float(std::atof(argv[8])); if (argc > 9) lo.painter = std::atoi(argv[9]); if (argc > 10) lo.bspFrac = float(std::atof(argv[10])); if (argc > 11) lo.reuse = float(std::atof(argv[11])); if (argc > 12) lo.stillBsp = float(std::atof(argv[12])); if (argc > 14) lo.channels = std::atoi(argv[14]); if (argc > 15) lo.firstChannel = std::atoi(argv[15]);
+    lo.maxTotal = 150000; if (argc > 7) lo.denoise = std::atoi(argv[7]) != 0; if (argc > 8) lo.timeExp = float(std::atof(argv[8])); if (argc > 9) lo.painter = std::atoi(argv[9]); if (argc > 10) lo.bspFrac = float(std::atof(argv[10])); if (argc > 11) lo.reuse = float(std::atof(argv[11])); if (argc > 12) lo.stillBsp = float(std::atof(argv[12])); if (argc > 14) lo.channels = std::atoi(argv[14]); if (argc > 15) lo.firstChannel = std::atoi(argv[15]); if (argc > 16) lo.tree = std::atoi(argv[16]) != 0;
     std::cout << "GIF " << g.w << "x" << g.h << " frames=" << g.frames.size() << "\n";
 
     GifPlan plan = planFrames(g, maxFrames, 1.0, 0.03);
@@ -50,14 +50,12 @@ int main(int argc, char** argv) {
     Options o; o.maxRaster = 512; o.quality = 0; /* argv[13] sobreescribe */ o.lightSpecialChannels = true; o.maxChannels = 0;
     if (argc > 13) o.quality = std::atoi(argv[13]);
     double t0 = nowMs();
-    LayeredAnim A = buildLayered(g, plan, o, lo, nullptr, 4);
+    LayeredAnim A = buildAnim(g, plan, o, lo, nullptr, 4);
     double t1 = nowMs();
     if (!A.ok()) { std::cout << "FAIL build: " << A.note << "\n"; return 1; }
     size_t total = A.objectCount();
-    LayeredSchedule S = scheduleLayered(A);
-    { int mz = 0; for (auto& sh : A.still.shapes) mz = std::max<int>(mz, sh.z); std::cout << "z-order: still max=" << mz << " zRest=" << A.zRest << " zPatch=" << A.zPatch << "\n"; }
-    std::cout << "CAPAS: frames=" << N << " rests=" << A.rests.size() << " parches=" << S.nPatches 
-              << "  still=" << A.still.shapes.size() << " objetos=" << total << " triggers=" << S.triggers << " grupos=" << S.groups
+        std::cout << "CAPAS: frames=" << N << " rests=" << A.rests.size() << " profundidad=" << A.depthMax 
+              << "  still=" << A.still.shapes.size() << " objetos=" << total << " triggers=" << animTriggerCount(A) << " grupos=" << animGroupCount(A)
               << "  PSNR medio=" << A.psnrAvg << " min=" << A.psnrMin << "  (" << (t1 - t0) << " ms)\n";
 
     // --- referencia: metodo normal (BSP) con el MISMO numero total de objetos
@@ -71,7 +69,7 @@ int main(int argc, char** argv) {
 
     // --- cadena de GD + simulacion de triggers + rasterizado de lo visible
     GifExportParams p; p.baseGroup = 100; p.eo.longSide = 600;
-    std::string err, str = buildLayeredString(A, plan, p, &err);
+    std::string err, str = buildAnimString(A, plan, p, &err);
     if (str.empty()) { std::cout << "FAIL string: " << err << "\n"; return 1; }
     auto objs = parse(str);
     std::map<int, std::array<uint8_t,3>> chCol; int hsvObjs = 0, ch1Objs = 0, colorTrig = 0, shapeObjs = 0;

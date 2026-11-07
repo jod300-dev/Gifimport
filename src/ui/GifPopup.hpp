@@ -8,7 +8,8 @@
 #include "engine.hpp"
 #include "gdexport.hpp"
 #include "gifanim.hpp"
-#include "layered.hpp"      // metodo 18 (capas: fondo + rests + parches)
+#include "chanframes.hpp"     // colores en canales (sin HSV) para los metodos 1-17
+#include "deltatree.hpp"     // metodos 18 (capas: fondo + rests + parches) y 19 (arbol de deltas)
 
 using namespace geode::prelude;
 
@@ -43,7 +44,10 @@ protected:
         gdx::Options opt;
         int threads = 2;
         std::vector<gdx::Result> results;
-        std::shared_ptr<gdx::LayeredAnim> layered;           // metodo 18
+        bool useCh = false;                                  // check "canales": sin HSV, canal 1 nunca, desde el 2
+        int paletteK = 128;
+        std::vector<std::array<uint8_t, 3>> palette;         // paleta comun (metodos 1-17)
+        std::shared_ptr<gdx::LayeredAnim> layered;           // metodos 18-19
         std::atomic<bool> done{false};
     };
 
@@ -59,6 +63,7 @@ protected:
     void onSizeSlider(CCObject* sender);
     void onFramesSlider(CCObject* sender);
     void onGray(CCObject*);
+    void onChan(CCObject*);
 
     void stepMethod(int dir);
     void refreshLabels();
@@ -72,8 +77,10 @@ protected:
     void setStatus(std::string const& a, std::string const& b = "", std::string const& note = "");
 
     // Indice del metodo 18 (capas) en la lista de la ventana: va despues de los 17 metodos de imagen.
-    static constexpr int kLayeredIndex = int(gdx::Method::Ascii);
-    bool layered() const { return m_method == kLayeredIndex; }
+    static constexpr int kLayeredIndex = int(gdx::Method::Ascii);      // 18: capas (fondo + rests + parches)
+    static constexpr int kTreeIndex = kLayeredIndex + 1;               // 19: arbol de deltas
+    bool layered() const { return m_method >= kLayeredIndex; }         // 18 y 19 comparten el flujo por capas
+    bool treeMode() const { return m_method == kTreeIndex; }
     gdx::Method method() const { return layered() ? gdx::Method::BSP : gdx::Method(m_method); }
     gdx::LayeredOptions makeLayeredOptions() const;
     std::string layeredKey() const;
@@ -96,11 +103,13 @@ protected:
     gdx::Result m_result;                 // frame 0 convertido (vista previa)
     bool m_hasResult = false;
 
-    int m_method = 2;                     // 0..17 (17 = capas; BSP por defecto)
+    int m_method = 2;                     // 0..18 (17 = capas, 18 = arbol; BSP por defecto)
     int m_perFrame = 300;                 // objetos por frame
     int m_sizeU = 600;                    // lado largo, unidades GD
     int m_maxFrames = 40;                 // frames maximos a usar
     bool m_gray = false;
+    bool m_chan = false;                  // colores en canales (sin HSV) en los 19 metodos; por defecto HSV
+    int paletteSize() const;
 
     CCLabelBMFont* m_methodLabel = nullptr;
     CCLabelBMFont* m_descLabel = nullptr;
@@ -111,6 +120,7 @@ protected:
     Slider* m_sizeSlider = nullptr;
     Slider* m_framesSlider = nullptr;
     CCMenuItemToggler* m_chkGray = nullptr;
+    CCMenuItemToggler* m_chkChan = nullptr;
     CCLabelBMFont* m_statA = nullptr;
     CCLabelBMFont* m_statB = nullptr;
     CCLabelBMFont* m_noteLabel = nullptr;
