@@ -322,9 +322,8 @@ inline std::string buildTreeString(const LayeredAnim& a, const GifPlan& plan, co
     for (int i = 0; i < N; ++i) emit(a.patches[size_t(i)], gLayer[size_t(i)], a.zNode[size_t(i)]);
 
     GdSize sz = gdImageSize(a.still, p.eo);
-    const double left = p.eo.originX - sz.w * 0.5, top = p.eo.originY + sz.h * 0.5 + 45.0;
-    const int cols = 30; int kk = 0;
-    auto pos = [&](double& x, double& y) { x = left + (kk % cols) * 30.0; y = top + (kk / cols) * 30.0; ++kk; };
+    detail::TrigBoard board(p.eo.originX - sz.w * 0.5, p.eo.originY + sz.h * 0.5 + 90.0);
+    auto pos = [&](double& x, double& y) { board.at(x, y); };
     double x, y, t = 0;
     for (int i = 0; i < N; ++i) {                               // bucle L
         if (gStep[size_t(i)] > 0) { pos(x, y); detail::addSpawn(out, p, x, y, gStep[size_t(i)], t, L); }
@@ -332,18 +331,21 @@ inline std::string buildTreeString(const LayeredAnim& a, const GifPlan& plan, co
     }
     pos(x, y); detail::addSpawn(out, p, x, y, L, plan.total, L);
     if (hasI) { pos(x, y); detail::addSpawn(out, p, x, y, I, 0, L); }     // autocorreccion en cada vuelta
+    board.newBlock();
     for (int i = 0; i < N; ++i) {                               // pasos: ocultar lo que sale del camino, mostrar lo que entra
         const int F = gStep[size_t(i)]; if (F <= 0) continue;
         for (int l : S.hide[size_t(i)]) { pos(x, y); detail::addAlpha(out, p, x, y, gLayer[size_t(l)], 0, F); }
         for (int l : S.show[size_t(i)]) { pos(x, y); detail::addAlpha(out, p, x, y, gLayer[size_t(l)], 1, F); }
     }
+    board.newBlock();
     if (hasI) for (int l : S.initHide) { pos(x, y); detail::addAlpha(out, p, x, y, gLayer[size_t(l)], 0, I); }
-    double sx = p.trigX, sy = top + ((kk / cols) + 2) * 30.0;
+    board.newBlock();
+    double sx = p.trigX, sy = board.nextY();
     detail::addSpawn(out, p, sx, sy, L, 0, 0);
-    if (hasI) detail::addSpawn(out, p, sx, sy + 30.0, I, 0, 0);
+    if (hasI) detail::addSpawn(out, p, sx, sy + 52.0, I, 0, 0);
     if (useCh) {
         for (size_t i = 0; i < a.palette.size(); ++i) {
-            const double cx = p.trigX - 30.0 * double(1 + int(i) % 25), cy = sy + 60.0 + 30.0 * double(int(i) / 25);
+            const double cx = p.trigX - 48.0 * double(1 + int(i) % 20), cy = sy + 90.0 + 52.0 * double(int(i) / 20);
             detail::addTriggerHead(out, 899, cx, cy);
             out += ",7,"; out += std::to_string(a.palette[i][0]); out += ",8,"; out += std::to_string(a.palette[i][1]);
             out += ",9,"; out += std::to_string(a.palette[i][2]);

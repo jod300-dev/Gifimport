@@ -78,7 +78,21 @@ Notas: la calidad sube de forma continua con el presupuesto (medido de 500 a 400
 
 Los triggers de arranque estan por defecto en x = -30: solo se ejecutan si juegas **desde el inicio del nivel**. Si pruebas con *Playtest desde la posicion del editor* o un Start Pos mas a la derecha, desactiva *Triggers de arranque en el inicio* para que queden junto a la imagen.
 
+| Triggers "amontonados" en el editor | Cuadricula de 30 x 30 u: el icono mide ~30 u y lleva etiqueta arriba y numeros abajo, asi que se pisaban (446-781 pares) | `detail::TrigBoard`: separacion 48 x 52 u, 20 columnas y un bloque por funcion (bucle / mostrar-ocultar / inicio) con una fila libre entre bloques, a 90 u de la imagen; 0 pares solapados (la prueba lo exige). **Ojo:** la posicion de un trigger *spawn-triggered* no afecta a su funcionamiento: esto mejora la legibilidad; si en el juego los frames se superponen, el motivo es otro (ver *Modo al colocar*). |
+
 Regla para metodos futuros: pasar siempre por `convert()` (o llamar a `sanitizeResult`), y ejecutar `tests/sanity_test.cpp`.
+
+## Patron de calibracion (diagnostico)
+Ajuste **Modo al colocar -> Patron de calibracion**: al pulsar *Colocar* se colocan ~115 objetos de prueba (no usa el GIF) generados por el **mismo exportador** que el resto. Compara lo que ves con `calibracion_esperado.png`:
+
+| Fila | Prueba | Si GD se ve distinto, significa que... |
+|---|---|---|
+| 1 | Orden por z-order: rojo y azul solapados en 6 casos (z 1/5, creado al reves, 1/30, 1/300, empate creado azul-rojo y rojo-azul) | el orden de dibujo no sigue al z-order (o hay un limite de z) |
+| 2 | Franja 40x5 girada 0,30,60,90,120,150 sobre un cuadrado gris | el sentido/eje de giro o la escala no uniforme con rotacion difieren del modelo |
+| 3 | Base gris + franja verde girada (creada antes/despues; franjas de 1 u, 0.5 u; 8 apiladas) | las formas de los metodos 7/8/18/19 se tapan entre si |
+| 4 | Rayas negras de alto 6, 3, 1.5, 0.75, 0.4, 0.2 u | hay un tamano minimo visible: los trazos finos desaparecen |
+| 5 | 60 tiras de 0.5 u: degradado continuo | GD redondea posiciones/escalas sub-unidad |
+| 6 | Canales 2,3,4,5 (rojo, verde, azul, amarillo) por Color trigger, y los mismos colores en HSV | los colores de canal no se aplican en el editor |
 
 ## NO verificado
 * `src/ui` y `src/main.cpp` **no se han compilado ni probado en el juego** (incluidas las ramas nuevas del metodo 18; el motor `layered.hpp` si esta probado) (se escribieron contra el patron del Image Exporter). Puede pedir algun ajuste menor.

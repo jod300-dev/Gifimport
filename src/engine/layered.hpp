@@ -884,10 +884,8 @@ inline std::string buildLayeredString(const LayeredAnim& a, const GifPlan& plan,
 
     // --- triggers
     GdSize sz = gdImageSize(a.still, p.eo);
-    const double left = p.eo.originX - sz.w * 0.5, top = p.eo.originY + sz.h * 0.5 + 45.0;
-    const int cols = 30;
-    int kk = 0;
-    auto pos = [&](double& x, double& y) { x = left + (kk % cols) * 30.0; y = top + (kk / cols) * 30.0; ++kk; };
+    detail::TrigBoard board(p.eo.originX - sz.w * 0.5, p.eo.originY + sz.h * 0.5 + 90.0);
+    auto pos = [&](double& x, double& y) { board.at(x, y); };
     double x, y;
 
     double t = 0;                                              // bucle L
@@ -897,6 +895,7 @@ inline std::string buildLayeredString(const LayeredAnim& a, const GifPlan& plan,
     }
     pos(x, y); detail::addSpawn(out, p, x, y, L, plan.total, L);
     if (hasI) { pos(x, y); detail::addSpawn(out, p, x, y, I, 0, L); }     // autocorreccion en cada vuelta
+    board.newBlock();
 
     for (int i = 0; i < N; ++i) {                              // pasos F_i
         const LayerStep& st = S.step[size_t(i)];
@@ -907,17 +906,19 @@ inline std::string buildLayeredString(const LayeredAnim& a, const GifPlan& plan,
         if (st.hideRest >= 0)  { pos(x, y); detail::addAlpha(out, p, x, y, gRest[size_t(st.hideRest)], 0, F); }
         if (st.showRest >= 0)  { pos(x, y); detail::addAlpha(out, p, x, y, gRest[size_t(st.showRest)], 1, F); }
     }
+    board.newBlock();
     if (hasI) {                                                // inicio I: ocultar lo que no se ve en el frame 0
         for (int i : S.initHidePatch) { pos(x, y); detail::addAlpha(out, p, x, y, gPatch[size_t(i)], 0, I); }
         for (int k : S.initHideRest)  { pos(x, y); detail::addAlpha(out, p, x, y, gRest[size_t(k)], 0, I); }
     }
-    double sx = p.trigX, sy = top + ((kk / cols) + 2) * 30.0;
+    board.newBlock();
+    double sx = p.trigX, sy = board.nextY();
     detail::addSpawn(out, p, sx, sy, L, 0, 0);
-    if (hasI) detail::addSpawn(out, p, sx, sy + 30.0, I, 0, 0);
+    if (hasI) detail::addSpawn(out, p, sx, sy + 52.0, I, 0, 0);
 
     if (useCh) {                                               // Color triggers (id 899) al inicio: fijan el color de cada canal
         for (size_t i = 0; i < a.palette.size(); ++i) {
-            const double cx = p.trigX - 30.0 * double(1 + int(i) % 25), cy = sy + 60.0 + 30.0 * double(int(i) / 25);
+            const double cx = p.trigX - 48.0 * double(1 + int(i) % 20), cy = sy + 90.0 + 52.0 * double(int(i) / 20);
             detail::addTriggerHead(out, 899, cx, cy);
             out += ",7,"; out += std::to_string(a.palette[i][0]);
             out += ",8,"; out += std::to_string(a.palette[i][1]);

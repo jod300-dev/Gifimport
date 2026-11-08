@@ -1,3 +1,9 @@
+# v0.4.4-beta
+- Nuevo modo al colocar "Patron de calibracion" (+ `calibracion_esperado.png`): prueba por separado z-order, rotacion, tamanos minimos, precision sub-unidad y canales de color en GD.
+- Triggers ordenados: 48 x 52 u, 20 columnas, un bloque por funcion; 0 solapes (antes 446-781 pares). Color triggers tambien separados.
+- Fix: en el patron de calibracion el ultimo objeto quedaba pegado al primer Color trigger (faltaba ';').
+- sanity_test: comprueba que ningun trigger spawn-triggered se pisa con otro y valida el patron de calibracion.
+
 # v0.4.3-beta
 - FIX: formas solapadas con el mismo z-order (orden arbitrario en GD): el z-order ahora se compacta con solape geometrico exacto (SAT); 0 empates.
 - Bucle de triggers autocorregido: cada vuelta oculta de nuevo todo salvo el frame 0.

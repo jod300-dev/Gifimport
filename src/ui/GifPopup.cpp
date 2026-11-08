@@ -662,7 +662,15 @@ void GifPopup::finishBuild(std::shared_ptr<BuildJob> job) {
     // Modo de diagnostico: objetos estaticos, SIN triggers (hoja de frames o solo el frame 0).
     {
         const std::string pm = mod->getSettingValue<std::string>("place-mode");
-        const bool sheet = pm.rfind("Hoja", 0) == 0, solo = pm.rfind("Solo", 0) == 0;
+        const bool sheet = pm.rfind("Hoja", 0) == 0, solo = pm.rfind("Solo", 0) == 0, calib = pm.rfind("Patron", 0) == 0;
+        if (calib) {                                            // patron de calibracion: no usa el GIF
+            auto cr = gdx::buildCalibration(p.eo, p.trigX);
+            CCArray* made = lel->createObjectsFromString(cr.str.c_str(), true, true);
+            if (made && made->count() > 0 && mod->getSettingValue<bool>("select-after") && m_editor) m_editor->selectObjects(made, true);
+            Notification::create("Patron de calibracion colocado", NotificationIcon::Success, 3.5f)->show();
+            this->onClose(nullptr);
+            return;
+        }
         if (sheet || solo) {
             std::vector<gdx::Result> frames;
             std::vector<std::array<uint8_t, 3>> pal;

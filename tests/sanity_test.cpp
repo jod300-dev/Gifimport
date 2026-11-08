@@ -12,9 +12,11 @@
 #define STBI_NO_STDIO
 #include "chanframes.hpp"
 #include "deltatree.hpp"
+#include "calib.hpp"
 #include "sheet.hpp"
 #include <fstream>
 #include <iostream>
+#include <set>
 #include <sstream>
 using namespace gdx;
 static std::vector<std::map<int, std::string>> parse(const std::string& s) {
@@ -22,6 +24,20 @@ static std::vector<std::map<int, std::string>> parse(const std::string& s) {
     while (std::getline(ss, item, ';')) { std::map<int, std::string> kv; std::stringstream is(item); std::string a, b; while (std::getline(is, a, ',') && std::getline(is, b, ',')) kv[std::stoi(a)] = b; v.push_back(kv); }
     return v;
 }
+// triggers spawn-triggered (iconos ~30 u + etiqueta/numeros = caja 40 x 44) que se pisan entre si
+static int triggerOverlaps(const std::string& s) {
+    std::vector<std::pair<double, double>> pts;
+    for (auto& kv : parse(s)) {
+        int id = std::stoi(kv.at(1));
+        if ((id != 1007 && id != 1268) || !kv.count(62)) continue;
+        pts.push_back({std::stod(kv.at(2)), std::stod(kv.at(3))});
+    }
+    int ov = 0;
+    for (size_t i = 0; i < pts.size(); ++i) for (size_t j = i + 1; j < pts.size(); ++j)
+        if (std::abs(pts[i].first - pts[j].first) < 40 && std::abs(pts[i].second - pts[j].second) < 44) ++ov;
+    return ov;
+}
+
 // pares que se solapan (> 0.1 px) y comparten z: en GD su orden relativo seria arbitrario
 static long tiedOverlaps(const std::vector<Shape>& sh) {
     long n = 0;
@@ -60,6 +76,7 @@ int main(int argc, char** argv) {
             GifExportParams p; p.baseGroup = 10; p.eo.longSide = 300; p.eo.originX = 1000; p.eo.originY = 500;
             std::string str = buildGifString(res, plan, p, nullptr);
             if (str.empty()) { fail("metodo " + std::to_string(m + 1) + ": cadena vacia"); continue; }
+            if (int ov = triggerOverlaps(str)) fail("metodo " + std::to_string(m + 1) + ": " + std::to_string(ov) + " pares de triggers se pisan");
             GdSize sz = gdImageSize(res[0], p.eo);
             double zf0 = -1e9, zOthers = -1e9;
             for (auto& kv : parse(str)) {
@@ -96,6 +113,7 @@ int main(int argc, char** argv) {
         GifExportParams p; p.baseGroup = 10; p.eo.longSide = 300; p.eo.originX = 1000; p.eo.originY = 500;
         std::string err, str = buildAnimString(A, plan, p, &err);
         if (str.empty()) { fail(tag + ": cadena vacia " + err); continue; }
+        if (int ov = triggerOverlaps(str)) fail(tag + ": " + std::to_string(ov) + " pares de triggers se pisan");
         GdSize sz = gdImageSize(A.still, p.eo);
         for (auto& kv : parse(str)) {
             if (std::stoi(kv.at(1)) != p.eo.objectId) continue;
@@ -133,6 +151,27 @@ int main(int argc, char** argv) {
             if (useCh && trig != pal.size()) fail("hoja: color-triggers != paleta");
             ++checks;
         }
+    }
+    // patron de calibracion: cadena bien formada, 111 objetos HSV + 4 de canal (2..5) + 4 Color triggers, z=300 presente, sin canal 1
+    {
+        GdExportOptions eo; eo.originX = 1000; eo.originY = 500;
+        auto cr = buildCalibration(eo, -30);
+        int hsv = 0, chs = 0, trig = 0, zmax = 0, bad1 = 0, malformed = 0;
+        std::set<int> chans;
+        for (auto& kv : parse(cr.str)) {
+            if (!kv.count(1)) { ++malformed; continue; }
+            int id = std::stoi(kv.at(1));
+            if (id == 899) { ++trig; chans.insert(std::stoi(kv.at(23))); continue; }
+            if (id != eo.objectId) { ++malformed; continue; }
+            if (kv.count(43)) ++hsv; else { ++chs; if (std::stoi(kv.at(21)) < 2) ++bad1; }
+            zmax = std::max(zmax, std::stoi(kv.at(25)));
+            if (!kv.count(2) || !kv.count(3) || !kv.count(128) || !kv.count(129)) ++malformed;
+        }
+        if (malformed) fail("calibracion: " + std::to_string(malformed) + " objetos mal formados");
+        if (hsv != 111 || chs != 4) fail("calibracion: numero de objetos inesperado (HSV " + std::to_string(hsv) + ", canal " + std::to_string(chs) + ")");
+        if (trig != 4 || chans != std::set<int>({2, 3, 4, 5})) fail("calibracion: Color triggers/canales incorrectos");
+        if (zmax < 300) fail("calibracion: falta el z-order 300"); if (bad1) fail("calibracion: usa canal < 2");
+        ++checks;
     }
     std::cout << checks << " comprobaciones: " << (bad ? std::to_string(bad) + " FALLOS\n" : std::string("TODO OK\n"));
     return bad ? 1 : 0;

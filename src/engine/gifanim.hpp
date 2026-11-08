@@ -91,6 +91,19 @@ inline GifPlan planFrames(const GifData& g, int maxFrames, double speed, double 
     return p;
 }
 
+namespace detail {
+// Colocacion ordenada de los triggers (la posicion no afecta a los spawn-triggered, pero asi se leen y no se pisan):
+// iconos separados 48 x 52 u (el icono mide ~30 u y lleva etiqueta arriba y numeros abajo), 20 columnas y un bloque por funcion
+// con una fila libre entre bloques (bucle / mostrar-ocultar / inicio).
+struct TrigBoard {
+    double left, top, dx, dy; int cols; int k = 0;
+    TrigBoard(double l, double t, int c = 20, double ddx = 48.0, double ddy = 52.0) : left(l), top(t), dx(ddx), dy(ddy), cols(c) {}
+    void at(double& x, double& y) { x = left + (k % cols) * dx; y = top + (k / cols) * dy; ++k; }
+    void newBlock() { if (k % cols) k += cols - (k % cols); }          // siguiente fila
+    double nextY() const { return top + double((k + cols - 1) / cols + 1) * dy; }
+};
+} // namespace detail
+
 constexpr int kGifTriggersPerFrame = 4;
 inline int gifTriggerCount(int frames) { return kGifTriggersPerFrame * frames + 3; }   // +1: Spawn(I) en cada vuelta
 inline int gifGroupCount(int frames) { return 2 * frames + 2; }
@@ -202,10 +215,8 @@ inline std::string buildGifString(const std::vector<Result>& results, const GifP
     // --- triggers: cuadricula encima de la imagen (la posicion no importa para los spawn-triggered)
     const Result& r0 = results[0];
     GdSize sz = gdImageSize(r0, p.eo);
-    const double left = p.eo.originX - sz.w * 0.5, top = p.eo.originY + sz.h * 0.5 + 45.0;
-    const int cols = 30;
-    int k = 0;
-    auto pos = [&](double& x, double& y) { x = left + (k % cols) * 30.0; y = top + (k / cols) * 30.0; ++k; };
+    detail::TrigBoard board(p.eo.originX - sz.w * 0.5, p.eo.originY + sz.h * 0.5 + 90.0);
+    auto pos = [&](double& x, double& y) { board.at(x, y); };
     double x, y;
 
     // bucle L: Spawn(F_i, t_i) + Spawn(L, total)
@@ -220,20 +231,23 @@ inline std::string buildGifString(const std::vector<Result>& results, const GifP
     // Autocorreccion: en cada vuelta se vuelve a ocultar todo salvo el frame 0, asi un trigger fallido no deja frames superpuestos.
     pos(x, y);
     detail::addSpawn(out, p, x, y, I, 0, L);
+    board.newBlock();
 
     // F_i: mostrar G_i, ocultar el frame anterior
     for (int i = 0; i < N; ++i) {
         pos(x, y); detail::addAlpha(out, p, x, y, G0 + i, 1, F0 + i);
         pos(x, y); detail::addAlpha(out, p, x, y, G0 + (i + N - 1) % N, 0, F0 + i);
     }
+    board.newBlock();
     // I: ocultar los frames 1..N-1 al empezar
     for (int i = 1; i < N; ++i) {
         pos(x, y); detail::addAlpha(out, p, x, y, G0 + i, 0, I);
     }
+    board.newBlock();
     // arranque (triggers de posicion): lanzan L e I
-    double sx = p.trigX, sy = top + ((k / cols) + 2) * 30.0;
+    double sx = p.trigX, sy = board.nextY();
     detail::addSpawn(out, p, sx, sy, L, 0, 0);
-    detail::addSpawn(out, p, sx, sy + 30.0, I, 0, 0);
+    detail::addSpawn(out, p, sx, sy + 52.0, I, 0, 0);
 
     if (!out.empty() && out.back() == ';') out.pop_back();
     return out;

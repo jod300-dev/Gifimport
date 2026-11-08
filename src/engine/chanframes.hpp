@@ -42,7 +42,7 @@ inline std::vector<std::array<uint8_t, 3>> quantizeFrames(std::vector<Result>& r
 // Un Color trigger (id 899) por canal de la paleta, a la izquierda del inicio (se ejecutan al empezar el nivel).
 inline void appendColorTriggers(std::string& out, const std::vector<std::array<uint8_t, 3>>& palette, int firstChannel, double trigX, double sy) {
     for (size_t i = 0; i < palette.size(); ++i) {
-        const double cx = trigX - 30.0 * double(1 + int(i) % 25), cy = sy + 60.0 + 30.0 * double(int(i) / 25);
+        const double cx = trigX - 48.0 * double(1 + int(i) % 20), cy = sy + 90.0 + 52.0 * double(int(i) / 20);
         detail::addTriggerHead(out, 899, cx, cy);
         out += ",7,"; out += std::to_string(palette[i][0]);
         out += ",8,"; out += std::to_string(palette[i][1]);
@@ -86,21 +86,23 @@ inline std::string buildGifStringCh(const std::vector<Result>& results, const Gi
     }
     const Result& r0 = results[0];
     GdSize sz = gdImageSize(r0, p.eo);
-    const double left = p.eo.originX - sz.w * 0.5, top = p.eo.originY + sz.h * 0.5 + 45.0;
-    const int cols = 30; int k = 0;
-    auto pos = [&](double& x, double& y) { x = left + (k % cols) * 30.0; y = top + (k / cols) * 30.0; ++k; };
+    detail::TrigBoard board(p.eo.originX - sz.w * 0.5, p.eo.originY + sz.h * 0.5 + 90.0);
+    auto pos = [&](double& x, double& y) { board.at(x, y); };
     double x, y, t = 0;
     for (int i = 0; i < N; ++i) { pos(x, y); detail::addSpawn(out, p, x, y, F0 + i, t, L); t += plan.delay[size_t(i)]; }
     pos(x, y); detail::addSpawn(out, p, x, y, L, plan.total, L);
     pos(x, y); detail::addSpawn(out, p, x, y, I, 0, L);                 // autocorreccion en cada vuelta
+    board.newBlock();
     for (int i = 0; i < N; ++i) {
         pos(x, y); detail::addAlpha(out, p, x, y, G0 + i, 1, F0 + i);
         pos(x, y); detail::addAlpha(out, p, x, y, G0 + (i + N - 1) % N, 0, F0 + i);
     }
+    board.newBlock();
     for (int i = 1; i < N; ++i) { pos(x, y); detail::addAlpha(out, p, x, y, G0 + i, 0, I); }
-    double sx = p.trigX, sy = top + ((k / cols) + 2) * 30.0;
+    board.newBlock();
+    double sx = p.trigX, sy = board.nextY();
     detail::addSpawn(out, p, sx, sy, L, 0, 0);
-    detail::addSpawn(out, p, sx, sy + 30.0, I, 0, 0);
+    detail::addSpawn(out, p, sx, sy + 52.0, I, 0, 0);
     appendColorTriggers(out, palette, kFirstColorChannel, p.trigX, sy);
     if (!out.empty() && out.back() == ';') out.pop_back();
     return out;

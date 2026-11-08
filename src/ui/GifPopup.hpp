@@ -8,6 +8,7 @@
 #include "engine.hpp"
 #include "gdexport.hpp"
 #include "gifanim.hpp"
+#include "calib.hpp"          // patron de calibracion (diagnostico)
 #include "sheet.hpp"          // modo de diagnostico: hoja de frames sin triggers
 #include "chanframes.hpp"     // colores en canales (sin HSV) para los metodos 1-17
 #include "deltatree.hpp"     // metodos 18 (capas: fondo + rests + parches) y 19 (arbol de deltas)

@@ -8,7 +8,7 @@
 	},
 	"id": "patasma.gif_importer",
 	"name": "GIF Importer",
-	"version": "v0.4.3-beta",
+	"version": "v0.4.4-beta",
 	"developer": "Patasma",
 	"description": "Importa GIFs animados al editor usando Alpha triggers + Spawn triggers en bucle infinito. Eliges objetos por frame y metodo de imagen (17 metodos + metodo 18 por capas: fondo, rests y parches). BETA.",
 	"resources": {
@@ -61,10 +61,11 @@
 			"one-of": [
 				"Animacion (con triggers)",
 				"Hoja de frames (sin triggers)",
-				"Solo el frame 0 (sin triggers)"
+				"Solo el frame 0 (sin triggers)",
+				"Patron de calibracion (diagnostico)"
 			],
 			"name": "Modo al colocar",
-			"description": "<cy>Animacion</c>: lo normal. <cy>Hoja de frames</c>: coloca todos los frames lado a lado como objetos estaticos, <cr>sin triggers</c>: sirve para ver la calidad real de cada frame en el juego y descubrir si un problema viene de la conversion o de los triggers. <cy>Solo el frame 0</c>: una imagen estatica."
+			"description": "<cy>Animacion</c>: lo normal. <cy>Hoja de frames</c>: todos los frames lado a lado, objetos estaticos sin triggers. <cy>Solo el frame 0</c>: una imagen estatica. <cy>Patron de calibracion</c>: coloca ~100 objetos de prueba (orden de dibujo, rotacion, tamanos diminutos, canales de color) para ver como dibuja GD; no usa el GIF."
 		},
 		"triggers-at-start": {
 			"type": "bool",
