@@ -179,9 +179,16 @@ inline LayeredAnim buildTree(const GifData& g, const GifPlan& plan, const Option
     report(prog, 0.16f);
     if (isCancelled(prog)) { A.cancelled = true; return A; }
 
-    // --- presupuesto total; reparto: densidad ~ (frames que ven la capa)^te ; fondo = W*H*wt(N), cada delta = area x wt(subarbol)
+    // --- presupuesto total: reserva el espacio para Color Triggers antes de trazar.
     const int trigEst = 6 * N + 16;
-    const double T = std::max(40.0, std::min(double(lo.perFrame) * N, double(lo.maxTotal) - trigEst));
+    A.firstChannel = std::clamp(lo.firstChannel, 2, 998);
+    const int paletteBudget = lo.channels >= 2
+        ? std::clamp(std::min(lo.channels, lo.maxTotal - trigEst - 40), 0, 999 - A.firstChannel + 1)
+        : 0;
+    if (lo.channels >= 2 && paletteBudget < lo.channels)
+        A.note = "Paleta limitada a " + std::to_string(paletteBudget) + " canales para respetar el tope total.";
+    const double shapeLimit = std::max(40.0, double(lo.maxTotal) - trigEst - paletteBudget);
+    const double T = std::min(double(lo.perFrame) * N, shapeLimit);
     A.budgetTotal = int(T);
     const double reuseArea = double(std::clamp(lo.reuse, 0.f, 0.2f)) * double(W) * H;
     A.patches.resize(size_t(N));
@@ -248,11 +255,10 @@ inline LayeredAnim buildTree(const GifData& g, const GifPlan& plan, const Option
     report(prog, 0.9f);
 
     // --- colores en canales (paleta comun, el canal 1 nunca)
-    A.firstChannel = std::clamp(lo.firstChannel, 2, 998);
-    if (lo.channels > 0) {
+    if (paletteBudget >= 2) {
         std::vector<Result*> all{&A.still};
         for (auto& r : A.patches) all.push_back(&r);
-        A.palette = tree::quantizeResults(all, std::clamp(lo.channels, 2, 999 - A.firstChannel + 1));
+        A.palette = tree::quantizeResults(all, paletteBudget);
     }
     // --- z base de cada delta: encima de todo su camino
     A.zNode.assign(size_t(N), 0);
@@ -381,14 +387,109 @@ inline const char* treeDesc() {
            "Maxima nitidez con los mismos objetos. 'Objetos por frame' x frames = total.";
 }
 
-inline LayeredAnim buildAnim(const GifData& g, const GifPlan& plan, const Options& base, const LayeredOptions& lo, Progress* prog, int threads) {
-    return lo.tree ? buildTree(g, plan, base, lo, prog, threads) : buildLayered(g, plan, base, lo, prog, threads);
-}
 inline Result animFrameResult(const LayeredAnim& a, int f) { return a.tree ? treeFrameResult(a, f) : layeredFrameResult(a, f); }
 inline int animTriggerCount(const LayeredAnim& a) { return a.tree ? tree::schedule(a).triggers : layeredTriggerCount(a); }
 inline int animGroupCount(const LayeredAnim& a) { return a.tree ? tree::schedule(a).groups : layeredGroupCount(a); }
+
+// Ultima defensa del limite: los presupuestos por capa son aproximados y el
+// numero de triggers depende de las capas que realmente quedaron vacias.
+// Si hace falta, elimina primero las formas de menor area (parches antes que
+// rests y fondo), compacta la paleta y vuelve a medir el resultado.
+inline size_t enforceAnimObjectLimit(LayeredAnim& a, const GifData& g, const GifPlan& plan,
+                                     const Options& base, int maxTotal) {
+    if (!a.ok() || maxTotal < 1) return 0;
+    size_t total = a.objectCount() + size_t(animTriggerCount(a));
+    if (total <= size_t(maxTotal)) return 0;
+
+    struct Candidate { std::vector<Shape>* layer; size_t index; double score; };
+    std::vector<Candidate> candidates;
+    auto collect = [&](std::vector<Shape>& shapes, double keepWeight) {
+        for (size_t i = 0; i < shapes.size(); ++i) {
+            const Shape& sh = shapes[i];
+            const double area = std::max(0.01, double(sh.w) * double(sh.h));
+            candidates.push_back({&shapes, i, area * keepWeight});
+        }
+    };
+    collect(a.still.shapes, 2.0);
+    for (auto& r : a.rests) collect(r.shapes, 1.35);
+    for (auto& r : a.patches) collect(r.shapes, 1.0);
+    std::stable_sort(candidates.begin(), candidates.end(), [](const Candidate& x, const Candidate& y) {
+        return x.score < y.score;
+    });
+
+    std::map<std::vector<Shape>*, std::vector<uint8_t>> keep;
+    auto maskFor = [&](std::vector<Shape>* v) -> std::vector<uint8_t>& {
+        auto [it, inserted] = keep.try_emplace(v);
+        if (inserted) it->second.assign(v->size(), 1);
+        return it->second;
+    };
+    size_t stillLeft = a.still.shapes.size();
+    const size_t toRemove = total - size_t(maxTotal);
+    size_t removed = 0;
+    for (const Candidate& c : candidates) {
+        if (removed >= toRemove) break;
+        if (c.layer == &a.still.shapes && stillLeft <= 1) continue;
+        auto& mask = maskFor(c.layer);
+        if (!mask[c.index]) continue;
+        mask[c.index] = 0;
+        if (c.layer == &a.still.shapes) --stillLeft;
+        ++removed;
+    }
+    auto compact = [&](std::vector<Shape>& v) {
+        auto it = keep.find(&v);
+        if (it == keep.end()) return;
+        size_t w = 0;
+        for (size_t i = 0; i < v.size(); ++i) if (it->second[i]) v[w++] = v[i];
+        v.resize(w);
+    };
+    compact(a.still.shapes);
+    for (auto& r : a.rests) compact(r.shapes);
+    for (auto& r : a.patches) compact(r.shapes);
+
+    if (!a.palette.empty()) {
+        std::set<uint32_t> used;
+        auto scan = [&](const Result& r) { for (const Shape& sh : r.shapes) used.insert(lay::colKey(sh.r, sh.g, sh.b)); };
+        scan(a.still); for (const auto& r : a.rests) scan(r); for (const auto& r : a.patches) scan(r);
+        a.palette.erase(std::remove_if(a.palette.begin(), a.palette.end(), [&](const auto& c) {
+            return !used.count(lay::colKey(c[0], c[1], c[2]));
+        }), a.palette.end());
+    }
+
+    total = a.objectCount() + size_t(animTriggerCount(a));
+    if (total > size_t(maxTotal) || a.still.shapes.empty()) {
+        a.still.shapes.clear();
+        a.note = "El tope total es demasiado bajo para los triggers y objetos minimos de esta animacion.";
+        return removed;
+    }
+
+    if (removed) {
+        if (!a.note.empty()) a.note += " ";
+        a.note += "Tope total aplicado: se recortaron " + std::to_string(removed) + " formas pequenas para incluir todos los triggers.";
+        a.psnr.assign(size_t(a.frames), 0.0);
+        double sum = 0.0, mn = 1e9;
+        const int thr = std::clamp(base.alphaThreshold, 1, 255);
+        for (int i = 0; i < a.frames; ++i) {
+            Image reference = resizeArea(g.frames[size_t(plan.idx[size_t(i)])], a.W, a.H);
+            if (base.grayscale) reference = toGrayscale(reference);
+            Result visible = animFrameResult(a, i);
+            const double value = computePsnr(reference, renderShapes(visible.shapes, a.W, a.H), thr);
+            a.psnr[size_t(i)] = value;
+            sum += value; mn = std::min(mn, value);
+        }
+        a.psnrAvg = sum / std::max(1, a.frames);
+        a.psnrMin = mn;
+    }
+    return removed;
+}
+
 inline std::string buildAnimString(const LayeredAnim& a, const GifPlan& plan, const GifExportParams& p, std::string* err = nullptr) {
     return a.tree ? buildTreeString(a, plan, p, err) : buildLayeredString(a, plan, p, err);
+}
+
+inline LayeredAnim buildAnim(const GifData& g, const GifPlan& plan, const Options& base, const LayeredOptions& lo, Progress* prog, int threads) {
+    LayeredAnim a = lo.tree ? buildTree(g, plan, base, lo, prog, threads) : buildLayered(g, plan, base, lo, prog, threads);
+    if (a.ok()) enforceAnimObjectLimit(a, g, plan, base, lo.maxTotal);
+    return a;
 }
 
 } // namespace gdx

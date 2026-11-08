@@ -56,3 +56,11 @@
 - Primera version: importa GIFs animados con Alpha triggers + Spawn triggers en bucle infinito.
 - 17 metodos de imagen (los del Image Exporter, sin ASCII), objetos por frame, frames maximos, escala de grises.
 - Retardos reales del GIF, velocidad ajustable y tope total de objetos.
+
+
+## v0.4.6-beta - seguridad de presupuesto y colocacion
+
+- El limite total reserva tambien los Color Triggers (metodos 1-17 y modos 18/19).
+- Los modos por capas aplican un control final con el numero real de triggers y, si hace falta, recortan formas pequeñas antes de exportar; el PSNR se recalcula despues del recorte.
+- La interfaz ya no comunica exito cuando Geode no crea objetos; detecta importaciones parciales.
+- Documentacion corregida: el bucle normal usa `4N + 3` triggers, no `4N + 2`.

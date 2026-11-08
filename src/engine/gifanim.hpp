@@ -8,7 +8,7 @@
 //    L                  grupo del bucle: Spawn(F_i, retardo t_i) para cada i + Spawn(L, retardo = duracion total)
 //    I                  grupo de inicio: Alpha(G_i, 0) para i >= 1
 //    2 Spawn "de posicion" en x = trigX: uno lanza L (arranca la animacion) y otro lanza I
-//  Total de triggers = 4N + 2.   Grupos necesarios = 2N + 2.
+//  Total de triggers = 4N + 3 (incluye el Spawn(I) de autocorreccion).   Grupos necesarios = 2N + 2.
 // ============================================================================
 #pragma once
 #include <atomic>
@@ -112,10 +112,21 @@ constexpr int kGifTriggersPerFrame = 4;
 inline int gifTriggerCount(int frames) { return kGifTriggersPerFrame * frames + 3; }   // +1: Spawn(I) en cada vuelta
 inline int gifGroupCount(int frames) { return 2 * frames + 2; }
 
-// Objetos por frame que caben respetando el tope total (triggers incluidos).
-inline int gifPerFrameBudget(int requested, int frames, int maxTotal) {
-    int room = (maxTotal - gifTriggerCount(frames)) / std::max(1, frames);
-    return std::clamp(std::min(requested, room), 1, 80000);
+// Reserva tambien los Color Triggers del modo canales. El calculo usa el maximo
+// de la paleta solicitada; la paleta real nunca puede ser mayor.
+inline int gifPaletteBudget(int requested, int frames, int maxTotal) {
+    const long long n = std::max(1, frames);
+    const long long room = std::max(0LL, static_cast<long long>(maxTotal)
+        - gifTriggerCount(int(n)) - n); // deja al menos un objeto por frame
+    return int(std::clamp<long long>(std::min<long long>(std::max(0, requested), room), 0, 900));
+}
+
+// Objetos por frame que caben respetando el tope total (formas + triggers + paleta).
+inline int gifPerFrameBudget(int requested, int frames, int maxTotal, int extraObjects = 0) {
+    const long long n = std::max(1, frames);
+    const long long room = (static_cast<long long>(maxTotal) - gifTriggerCount(int(n))
+        - std::max(0, extraObjects)) / n;
+    return int(std::clamp<long long>(std::min<long long>(std::max(1, requested), room), 1, 80000));
 }
 
 // ------------------------------------------------------------ convertir -----

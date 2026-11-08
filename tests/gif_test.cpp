@@ -22,6 +22,45 @@ static std::vector<Obj> parse(const std::string& s) {
     return v;
 }
 
+static int triggerSchemaErrors(const std::vector<Obj>& objs, int frames) {
+    int errors = 0, alpha = 0, spawn = 0, startup = 0, loopSelf = 0;
+    double lastSpawnX = -1e18, spawnRowY = 0.0; bool firstSpawn = true;
+    std::vector<double> startupX;
+    for (const Obj& ob : objs) {
+        if (!ob.kv.count(1)) continue;
+        const int id = std::stoi(ob.kv.at(1));
+        if (id == 1007) {
+            ++alpha;
+            if (!ob.kv.count(51) || !ob.kv.count(35) || !ob.kv.count(10) ||
+                !ob.kv.count(62) || !ob.kv.count(87) || !ob.kv.count(57) ||
+                std::stoi(ob.kv.at(62)) != 1 || std::stoi(ob.kv.at(87)) != 1 ||
+                std::stoi(ob.kv.at(10)) != 0) ++errors;
+        } else if (id == 1268) {
+            ++spawn;
+            if (!ob.kv.count(51)) { ++errors; continue; }
+            const double x = std::stod(ob.kv.at(2)), y = std::stod(ob.kv.at(3));
+            if (ob.kv.count(62)) {
+                if (std::stoi(ob.kv.at(62)) != 1 || !ob.kv.count(87) ||
+                    std::stoi(ob.kv.at(87)) != 1 || !ob.kv.count(57)) ++errors;
+                if (x <= lastSpawnX || (!firstSpawn && std::abs(y - spawnRowY) > 0.01)) ++errors;
+                if (firstSpawn) { firstSpawn = false; spawnRowY = y; }
+                lastSpawnX = x;
+                if (std::stoi(ob.kv.at(51)) == std::stoi(ob.kv.at(57)) && ob.kv.count(63) && std::stod(ob.kv.at(63)) > 0.0) ++loopSelf;
+            } else {
+                ++startup;
+                startupX.push_back(x);
+                if (ob.kv.count(87) || ob.kv.count(57)) ++errors;
+            }
+        }
+    }
+    if (alpha != 3 * frames - 1) ++errors; // 2N Alpha de frame + N-1 de inicializacion
+    if (spawn != frames + 4) ++errors;     // N+2 dentro del loop + 2 de arranque
+    if (startup != 2 || startupX.size() != 2 || std::abs(std::abs(startupX[0] - startupX[1]) - 30.0) > 0.01) ++errors;
+    if (loopSelf != 1) ++errors;
+    if (alpha + spawn != gifTriggerCount(frames)) ++errors;
+    return errors;
+}
+
 int main(int argc, char** argv) {
     std::ifstream f(argc > 1 ? argv[1] : "tests/test.gif", std::ios::binary);
     std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)), {});
@@ -41,6 +80,8 @@ int main(int argc, char** argv) {
         if (s.empty()) { std::cout << "FAIL build: " << err << "\n"; return 1; }
         auto objs = parse(s);
         const int N = plan.count();
+        const int schemaErrors = triggerSchemaErrors(objs, N);
+        if (schemaErrors) { std::cout << "FAIL: " << schemaErrors << " errores en flags/orden/count de triggers\n"; ++fails; }
 
         // --- simulacion
         std::map<int,int> opacity;                        // grupo -> 0/1 (por defecto 1)
@@ -91,6 +132,15 @@ int main(int argc, char** argv) {
                   << " cadena=" << s.size() / 1024 << "KB loop=" << plan.total << "s  secuencia " << (ok ? "OK" : "FALLA: " + why) << "\n";
         if (!ok) ++fails;
         if (methodIdx == 2) { std::ofstream("tests/out_sample.txt") << s; }
+    }
+    // El tope normal tambien debe incluir la paleta y los triggers.
+    for (int n : {2, 34, 300}) {
+        const int palette = gifPaletteBudget(900, n, 2000);
+        const int perFrame = gifPerFrameBudget(80000, n, 2000, palette);
+        const long long used = 1LL * n * perFrame + gifTriggerCount(n) + palette;
+        if (used > 2000 || perFrame < 1 || palette < 0 || palette > 900) {
+            std::cout << "FAIL: limite total para " << n << " frames = " << used << "\n"; ++fails;
+        }
     }
     // plan con muestreo (menos frames que el GIF)
     GifPlan p6 = planFrames(g, 5, 1.0, 0.02);

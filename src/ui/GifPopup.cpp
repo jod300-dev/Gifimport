@@ -237,6 +237,10 @@ int GifPopup::paletteSize() const {
     return std::clamp(int(Mod::get()->getSettingValue<int>("layered-palette-size")), 8, 900);
 }
 
+int GifPopup::paletteSizeForFrames(int frames) const {
+    return m_chan ? gdx::gifPaletteBudget(paletteSize(), frames, maxTotal()) : 0;
+}
+
 void GifPopup::onSettings(CCObject*) {
     openSettingsPopup(Mod::get());
 }
@@ -332,7 +336,7 @@ gdx::LayeredOptions GifPopup::makeLayeredOptions() const {
     lo.tol = std::clamp(int(mod->getSettingValue<int>("layered-tolerance")), 8, 80);
     lo.denoise = mod->getSettingValue<bool>("layered-denoise");
     lo.painter = mod->getSettingValue<bool>("layered-rotated") ? 1 : 0;
-    lo.channels = m_chan ? paletteSize() : 0;                       // sin el check: HSV
+    lo.channels = paletteSizeForFrames(makePlan().count());       // reserva paleta dentro del tope total; sin check: HSV
     lo.firstChannel = gdx::kFirstColorChannel;                      // siempre desde el 2: el canal 1 nunca se usa
     lo.reuse = float(std::clamp(mod->getSettingValue<double>("layered-reuse"), 0.0, 10.0) / 100.0);
     return lo;
@@ -354,7 +358,7 @@ std::string GifPopup::layeredKey() const {
     key += "|" + mod->getSettingValue<std::string>("quality");
     key += treeMode() ? "|T" : "|L";
     key += m_chan ? "|c" : "|h";
-    key += std::to_string(paletteSize());
+    key += std::to_string(paletteSizeForFrames(m_gif ? makePlan().count() : 2));
     return key;
 }
 
@@ -367,7 +371,7 @@ gdx::GifPlan GifPopup::makePlan() const {
 
 // Objetos por frame realmente usados: el pedido, recortado para no pasar del tope total.
 int GifPopup::effectivePerFrame(int frames) const {
-    return gdx::gifPerFrameBudget(m_perFrame, frames, maxTotal());
+    return gdx::gifPerFrameBudget(m_perFrame, frames, maxTotal(), paletteSizeForFrames(frames));
 }
 
 void GifPopup::scheduleRecompute() {
@@ -476,7 +480,12 @@ void GifPopup::applyPreview(std::shared_ptr<PreviewJob> job) {
             std::snprintf(b2, sizeof b2, "arbol prof. %d | %.1f dB | %.1f s", A.depthMax, A.psnrAvg, m_layeredPlan.total);
         else
             std::snprintf(b2, sizeof b2, "%d rests | %.1f dB | %.1f s", int(A.rests.size()), A.psnrAvg, m_layeredPlan.total);
-        this->setStatus(a2, b2, m_result.note);
+        std::string note = A.note;
+        if (!m_result.note.empty()) {
+            if (!note.empty()) note += " ";
+            note += m_result.note;
+        }
+        this->setStatus(a2, b2, note);
         return;
     }
 
@@ -486,12 +495,17 @@ void GifPopup::applyPreview(std::shared_ptr<PreviewJob> job) {
     int pf = effectivePerFrame(n);
     size_t kb0 = gdx::toGdString(m_result, makeExportOptions()).size() / 1024;
     size_t objs0 = m_result.shapes.size();
-    size_t totalObjs = objs0 * size_t(n) + size_t(gdx::gifTriggerCount(n)) + (m_chan ? size_t(paletteSize()) : size_t(0));
+    size_t totalObjs = objs0 * size_t(n) + size_t(gdx::gifTriggerCount(n)) + size_t(paletteSizeForFrames(n));
     char a1[96], b1[96];
     std::snprintf(a1, sizeof a1, "%d frames | ~%zu objetos", n, totalObjs);
     std::snprintf(b1, sizeof b1, "~%zu KB | %.1f s de bucle", kb0 * size_t(n) + size_t(n) * 2, plan.total);
     std::string note = m_result.note;
     if (pf < m_perFrame) note = "Limitado a " + std::to_string(pf) + " obj/frame por el tope total. " + note;
+    const int paletteLimit = paletteSizeForFrames(n);
+    if (m_chan && paletteLimit < paletteSize()) {
+        if (!note.empty()) note += " ";
+        note += "Paleta limitada a " + std::to_string(paletteLimit) + " canales por el tope total.";
+    }
     this->setStatus(a1, b1, note);
 }
 
@@ -627,7 +641,7 @@ void GifPopup::onPlace(CCObject*) {
     this->setStatus("Convirtiendo frames... 0%", "No cierres la ventana");
 
     job->useCh = m_chan;
-    job->paletteK = paletteSize();
+    job->paletteK = paletteSizeForFrames(job->plan.count());
     std::thread([job]() {
         try {
             job->results = gdx::convertFrames(*job->gif, job->plan, job->method, job->opt, &job->prog, job->threads);
@@ -666,7 +680,11 @@ void GifPopup::finishBuild(std::shared_ptr<BuildJob> job) {
         if (calib) {                                            // patron de calibracion: no usa el GIF
             auto cr = gdx::buildCalibration(p.eo, p.trigX);
             CCArray* made = lel->createObjectsFromString(cr.str.c_str(), true, true);
-            if (made && made->count() > 0 && mod->getSettingValue<bool>("select-after") && m_editor) m_editor->selectObjects(made, true);
+            if (!made || made->count() == 0) {
+                FLAlertLayer::create("GIF Importer", "Geometry Dash no pudo crear el patron de calibracion. No se marco como colocado.", "OK")->show();
+                return;
+            }
+            if (mod->getSettingValue<bool>("select-after") && m_editor) m_editor->selectObjects(made, true);
             Notification::create("Patron de calibracion colocado", NotificationIcon::Success, 3.5f)->show();
             this->onClose(nullptr);
             return;
@@ -690,7 +708,11 @@ void GifPopup::finishBuild(std::shared_ptr<BuildJob> job) {
                 return;
             }
             CCArray* made = lel->createObjectsFromString(s2.c_str(), true, true);
-            if (made && made->count() > 0 && mod->getSettingValue<bool>("select-after") && m_editor) m_editor->selectObjects(made, true);
+            if (!made || made->count() == 0) {
+                FLAlertLayer::create("GIF Importer", "Geometry Dash no pudo crear ningun objeto de la hoja. No se marco como colocada.", "OK")->show();
+                return;
+            }
+            if (mod->getSettingValue<bool>("select-after") && m_editor) m_editor->selectObjects(made, true);
             char m2[128];
             std::snprintf(m2, sizeof m2, solo ? "Frame 0 colocado (sin triggers)" : "Hoja de %d frames colocada (sin triggers)", int(frames.size()));
             Notification::create(m2, NotificationIcon::Success, 3.5f)->show();
@@ -720,9 +742,18 @@ void GifPopup::finishBuild(std::shared_ptr<BuildJob> job) {
         groupCount = gdx::animGroupCount(*job->layered);
     }
     CCArray* created = lel->createObjectsFromString(str.c_str(), true, true);
-    if (created && created->count() > 0 && mod->getSettingValue<bool>("select-after") && m_editor) {
-        m_editor->selectObjects(created, true);
+    if (!created || created->count() == 0) {
+        FLAlertLayer::create("GIF Importer", "Geometry Dash rechazo la cadena de objetos. No se notifico un falso exito; revisa el nivel y vuelve a intentar.", "OK")->show();
+        return;
     }
+    if (size_t(created->count()) != count) {
+        char warning[192];
+        std::snprintf(warning, sizeof warning, "Geode creo %u de %zu objetos esperados. La importacion quedo parcial; revisa el nivel antes de repetirla.", unsigned(created->count()), count);
+        FLAlertLayer::create("GIF Importer - importacion parcial", warning, "OK")->show();
+        if (mod->getSettingValue<bool>("select-after") && m_editor) m_editor->selectObjects(created, true);
+        return;
+    }
+    if (mod->getSettingValue<bool>("select-after") && m_editor) m_editor->selectObjects(created, true);
 
     char msg[128];
     std::snprintf(msg, sizeof msg, "GIF colocado: %d frames, %zu objetos, grupos %d-%d",

@@ -112,6 +112,7 @@ protected:
     bool m_gray = false;
     bool m_chan = false;                  // colores en canales (sin HSV) en los 19 metodos; por defecto HSV
     int paletteSize() const;
+    int paletteSizeForFrames(int frames) const;
 
     CCLabelBMFont* m_methodLabel = nullptr;
     CCLabelBMFont* m_descLabel = nullptr;

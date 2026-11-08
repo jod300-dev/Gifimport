@@ -10,7 +10,7 @@ Basado en el motor del *Image Exporter*. Convierte un GIF animado en objetos de 
 | `L`   | Spawn(`F_i`, retardo `t_i`) para cada frame + Spawn(`L`, retardo = duracion total) → **bucle infinito** |
 | `I`   | Alpha(`G_i`, 0) para i ≥ 1 (ocultar al empezar) |
 
-Mas 2 Spawn de posicion en x = -30 (lanzan `L` e `I`). Total: **4N + 2 triggers** y **2N + 2 grupos**. Los grupos se asignan por encima del mas alto que use el nivel.
+Mas 2 Spawn de posicion en x = -30 (lanzan `L` e `I`). Total: **4N + 3 triggers** y **2N + 2 grupos**. Los grupos se asignan por encima del mas alto que use el nivel.
 
 ## Metodo 18: Capas (fondo + rests + parches)
 Reproduce el mecanismo del mod *GIF to GD*: en vez de dibujar cada frame entero, la animacion se descompone en capas que casi no cambian.
@@ -68,7 +68,7 @@ Analisis de lo visto en el juego (preview limpio, pero astillas / frames "amalga
 | Astillas / halo alrededor de la imagen (metodos 7, 8, 9, 10, 12, 15, 16, 17, 18, 19) | Rectangulos girados que se salian del lienzo (hasta ~68 px). El preview los recortaba; GD **no**. | `Geo` ya no genera formas que sobresalgan (las alineadas a ejes se recortan) y `sanitizeResult` (`src/engine/sanitize.hpp`) confina **todo** resultado en `convert()`: unico punto de entrada de todos los metodos. |
 | z-order con ~1000 valores distintos (metodos 7/8) | Un z por forma | Compactado a la profundidad real de solapamiento (16-20 valores). |
 | Frames "amalgamados" en el editor | El editor no ejecuta triggers: todos los frames se ven apilados | El **frame 0 se dibuja encima** (z mayor): el editor muestra el frame 0 limpio. En el juego solo hay un frame visible a la vez, asi que no cambia nada. (En 18/19 el editor muestra las capas apiladas: es lo esperado.) |
-| "Pido 3000 y sale como 1150" | El **Tope total de objetos** (40000 por defecto) recorta los objetos por frame en silencio | La ventana muestra el valor aplicado: `3000 (tope: 1176)`. Sube el tope en ajustes si lo necesitas. |
+| "Pido 3000 y sale como 1150" | El **Tope total de objetos** (40000 por defecto) reserva espacio para formas, triggers y paleta | La ventana muestra el presupuesto aplicado; los modos 18/19 verifican el recuento real y pueden recortar formas pequeñas, recalculando el PSNR. |
 
 Notas: la calidad sube de forma continua con el presupuesto (medido de 500 a 4000 objetos/frame en todos los metodos): no hay valores "buenos" y "malos". Con *Lado largo* pequeno (p. ej. 210 u) los objetos miden <1 unidad: sube el lado largo si se ve borroso.
 
@@ -96,9 +96,9 @@ Ajuste **Modo al colocar -> Patron de calibracion**: al pulsar *Colocar* se colo
 | 5 | 60 tiras de 0.5 u: degradado continuo | GD redondea posiciones/escalas sub-unidad |
 | 6 | Canales 2,3,4,5 (rojo, verde, azul, amarillo) por Color trigger, y los mismos colores en HSV | los colores de canal no se aplican en el editor |
 
-## NO verificado
-* `src/ui` y `src/main.cpp` **no se han compilado ni probado en el juego** (incluidas las ramas nuevas del metodo 18; el motor `layered.hpp` si esta probado) (se escribieron contra el patron del Image Exporter). Puede pedir algun ajuste menor.
-* Las claves de triggers (Alpha 1007: 51/35/10; Spawn 1268: 51/63/62/87; grupos 57) siguen el formato estandar de 2.2 pero no estan probadas en GD.
+## Verificacion pendiente en Geode
+* `src/ui` y `src/main.cpp` no se pudieron compilar en este entorno porque no esta configurado `GEODE_SDK`; deben compilarse con Geode SDK 5.11.2 y probarse dentro de Geometry Dash. El motor sin dependencias de Geode si fue compilado y probado con los tests incluidos.
+* Los triggers se simulan en las pruebas sin Geode (flags Spawn Triggered/Multi-Trigger, orden horizontal, retardo del bucle y dos vueltas completas). Aun falta verificar su ejecucion real y el posicionamiento de inicio dentro de Geometry Dash.
 * Cada frame se convierte por separado (metodos 1-17): puede haber parpadeo entre frames. Los metodos 18 y 19 lo reducen mucho (fondo trazado una vez).
 * Retardos < 0.03 s se suben a 0.03 s (ajustable).
 

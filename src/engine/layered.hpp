@@ -641,9 +641,16 @@ inline LayeredAnim buildLayered(const GifData& g, const GifPlan& plan, const Opt
     report(prog, 0.14f);
     if (isCancelled(prog)) { A.cancelled = true; return A; }
 
-    // --- presupuesto total (igual que el metodo normal: perFrame x frames) y reparto
+    // --- presupuesto total: los Color Triggers tambien cuentan dentro del tope.
     const int trigEst = 4 * N + 2 * K + 8;
-    const double T = std::max(40.0, std::min(double(lo.perFrame) * N, double(lo.maxTotal) - trigEst));
+    A.firstChannel = std::clamp(lo.firstChannel, 2, 998);
+    const int paletteBudget = lo.channels >= 2
+        ? std::clamp(std::min(lo.channels, lo.maxTotal - trigEst - 40), 0, 999 - A.firstChannel + 1)
+        : 0;
+    if (lo.channels >= 2 && paletteBudget < lo.channels)
+        A.note = "Paleta limitada a " + std::to_string(paletteBudget) + " canales para respetar el tope total.";
+    const double shapeLimit = std::max(40.0, double(lo.maxTotal) - trigEst - paletteBudget);
+    const double T = std::min(double(lo.perFrame) * N, shapeLimit);
     A.budgetTotal = int(T);
     double Sest = double(W) * H * wt(N);
     for (int k = 0; k < K; ++k) Sest += a0[size_t(A.medoid[size_t(k)])] * wt(nUse[size_t(k)]);
@@ -729,9 +736,8 @@ inline LayeredAnim buildLayered(const GifData& g, const GifPlan& plan, const Opt
     for (int i = 0; i < N; ++i)                                                        // un parche vacio no se muestra
         if (A.patchOf[size_t(i)] >= 0 && A.patches[size_t(A.patchOf[size_t(i)])].shapes.empty()) A.patchOf[size_t(i)] = -1;
     // --- colores en canales: una paleta comun a todas las capas (cada color = un canal; el canal 1 nunca)
-    A.firstChannel = std::clamp(lo.firstChannel, 2, 998);
-    if (lo.channels > 0) {
-        const int K2 = std::clamp(lo.channels, 2, 999 - A.firstChannel + 1);
+    if (paletteBudget >= 2) {
+        const int K2 = paletteBudget;
         std::map<uint32_t, double> hist;
         auto addHist = [&](const Result& r) { for (auto& sh : r.shapes) hist[lay::colKey(sh.r, sh.g, sh.b)] += double(sh.w) * sh.h + 1.0; };
         addHist(A.still); for (auto& r : A.rests) addHist(r); for (auto& r : A.patches) addHist(r);

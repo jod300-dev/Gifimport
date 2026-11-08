@@ -42,7 +42,7 @@ int main(int argc, char** argv) {
     LayeredOptions lo; lo.perFrame = argc > 3 ? std::atoi(argv[3]) : 300;
     lo.inner = argc > 4 ? std::atoi(argv[4]) : 0; lo.restCount = argc > 5 ? std::atoi(argv[5]) : 0;
     if (argc > 6) lo.tol = std::atoi(argv[6]);
-    lo.maxTotal = 150000; if (argc > 7) lo.denoise = std::atoi(argv[7]) != 0; if (argc > 8) lo.timeExp = float(std::atof(argv[8])); if (argc > 9) lo.painter = std::atoi(argv[9]); if (argc > 10) lo.bspFrac = float(std::atof(argv[10])); if (argc > 11) lo.reuse = float(std::atof(argv[11])); if (argc > 12) lo.stillBsp = float(std::atof(argv[12])); if (argc > 14) lo.channels = std::atoi(argv[14]); if (argc > 15) lo.firstChannel = std::atoi(argv[15]); if (argc > 16) lo.tree = std::atoi(argv[16]) != 0;
+    lo.maxTotal = argc > 17 ? std::atoi(argv[17]) : 150000; if (argc > 7) lo.denoise = std::atoi(argv[7]) != 0; if (argc > 8) lo.timeExp = float(std::atof(argv[8])); if (argc > 9) lo.painter = std::atoi(argv[9]); if (argc > 10) lo.bspFrac = float(std::atof(argv[10])); if (argc > 11) lo.reuse = float(std::atof(argv[11])); if (argc > 12) lo.stillBsp = float(std::atof(argv[12])); if (argc > 14) lo.channels = std::atoi(argv[14]); if (argc > 15) lo.firstChannel = std::atoi(argv[15]); if (argc > 16) lo.tree = std::atoi(argv[16]) != 0;
     std::cout << "GIF " << g.w << "x" << g.h << " frames=" << g.frames.size() << "\n";
 
     GifPlan plan = planFrames(g, maxFrames, 1.0, 0.03);
@@ -54,9 +54,14 @@ int main(int argc, char** argv) {
     double t1 = nowMs();
     if (!A.ok()) { std::cout << "FAIL build: " << A.note << "\n"; return 1; }
     size_t total = A.objectCount();
+    const size_t withTriggers = total + size_t(animTriggerCount(A));
+    if (withTriggers > size_t(lo.maxTotal)) {
+        std::cout << "FAIL: se excedio maxTotal (" << withTriggers << " > " << lo.maxTotal << ")\n";
+        return 1;
+    }
         std::cout << "CAPAS: frames=" << N << " rests=" << A.rests.size() << " profundidad=" << A.depthMax 
               << "  still=" << A.still.shapes.size() << " objetos=" << total << " triggers=" << animTriggerCount(A) << " grupos=" << animGroupCount(A)
-              << "  PSNR medio=" << A.psnrAvg << " min=" << A.psnrMin << "  (" << (t1 - t0) << " ms)\n";
+              << " totalGD=" << withTriggers << "/" << lo.maxTotal << "  PSNR medio=" << A.psnrAvg << " min=" << A.psnrMin << "  (" << (t1 - t0) << " ms)\n";
 
     // --- referencia: metodo normal (BSP) con el MISMO numero total de objetos
     {
