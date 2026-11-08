@@ -25,6 +25,10 @@ struct GdExportOptions {
     int objectId = 3092;               // objeto cuadrado 1x1 u
     double bleed = 0.15;               // solape (u) para evitar costuras entre rectángulos
     int zBase = 0;                     // z-order del fondo
+    // GD trata el z-order 0 (clave 25 = 0) como "z por defecto del objeto" y lo dibuja ENCIMA de los z 1..N: la base BSP (z = 0) tapaba
+    // todos los rectangulos girados de los metodos 7/8/18/19 (en el juego solo se veia el BSP grueso). Por eso NUNCA se emite 0:
+    // todo z se desplaza zShift (>= 1). Solo el patron de calibracion lo pone a 0 para poder probar el valor crudo.
+    int zShift = 1;
     bool flipRotation = false;         // invierte el sentido de giro si hiciera falta
     // Blanco y negro sin canales libres: negro -> canal 1010 y blanco -> canal 1011 (sin HSV).
     bool monoFastPath = false;
@@ -167,7 +171,7 @@ inline std::string toGdString(const Result& r, const GdExportOptions& o) {
             out += ",41,1,43,"; appendGdHsv(out, s.r, s.g, s.b);
         }
         if (layers) { out += ",24,"; out += std::to_string(s.z <= 0 ? o.layerBase : o.layerInk); }
-        out += ",25,"; out += std::to_string(o.zBase + s.z);                  // SIEMPRE explícito
+        out += ",25,"; out += std::to_string(std::max(o.zBase + s.z, 0) + o.zShift);   // SIEMPRE explícito y nunca 0 (ver zShift)
         if (!o.groupStr.empty()) { out += ",57,"; out += o.groupStr; }
         out += ",128,"; detail::appendNum(out, sx, 3);
         out += ",129,"; detail::appendNum(out, sy, 3);
@@ -190,7 +194,7 @@ inline std::string toGdString(const Result& r, const GdExportOptions& o) {
         out += ",21,"; out += std::to_string(ch);
         out += ",31,"; out += base64Encode(t.text);
         out += ",24,"; out += std::to_string(o.layerInk);
-        out += ",25,"; out += std::to_string(o.zBase + 2);
+        out += ",25,"; out += std::to_string(o.zBase + 2 + std::max(o.zShift, 0));
         out += ",32,"; detail::appendNum(out, scale, 4);
         if (o.asciiKerning != 0) { out += ",488,"; out += std::to_string(o.asciiKerning); }
         out += ';';

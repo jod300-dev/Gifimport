@@ -884,7 +884,7 @@ inline std::string buildLayeredString(const LayeredAnim& a, const GifPlan& plan,
 
     // --- triggers
     GdSize sz = gdImageSize(a.still, p.eo);
-    detail::TrigBoard board(p.eo.originX - sz.w * 0.5, p.eo.originY + sz.h * 0.5 + 90.0);
+    detail::TrigBoard board(detail::rowLeft(p.eo.originX - sz.w * 0.5, p.trigX), p.eo.originY + sz.h * 0.5 + 90.0);
     auto pos = [&](double& x, double& y) { board.at(x, y); };
     double x, y;
 
@@ -913,8 +913,8 @@ inline std::string buildLayeredString(const LayeredAnim& a, const GifPlan& plan,
     }
     board.newBlock();
     double sx = p.trigX, sy = board.nextY();
-    detail::addSpawn(out, p, sx, sy, L, 0, 0);
-    if (hasI) detail::addSpawn(out, p, sx, sy + 52.0, I, 0, 0);
+    detail::addSpawn(out, p, sx, board.rowY(), L, 0, 0);          // arranque en la fila de triggers, a la izquierda de la imagen
+    if (hasI) detail::addSpawn(out, p, sx - 30.0, board.rowY(), I, 0, 0);   // I justo a la izquierda de L: nunca encima/debajo de otro
 
     if (useCh) {                                               // Color triggers (id 899) al inicio: fijan el color de cada canal
         for (size_t i = 0; i < a.palette.size(); ++i) {

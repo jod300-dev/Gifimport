@@ -92,16 +92,20 @@ inline GifPlan planFrames(const GifData& g, int maxFrames, double speed, double 
 }
 
 namespace detail {
-// Colocacion ordenada de los triggers (la posicion no afecta a los spawn-triggered, pero asi se leen y no se pisan):
-// iconos separados 48 x 52 u (el icono mide ~30 u y lleva etiqueta arriba y numeros abajo), 20 columnas y un bloque por funcion
-// con una fila libre entre bloques (bucle / mostrar-ocultar / inicio).
+// Colocacion de los triggers de frames: UNA SOLA FILA, uno tras otro hacia la derecha (x = left + k * 30), sin huecos y sin que
+// ninguno quede encima o debajo de otro. Un trigger que controla un frame va siempre a la derecha del anterior, asi el orden de
+// activacion (GD ejecuta los triggers de un mismo instante de izquierda a derecha) es el orden de los frames.
+// Solo los Color triggers (id 899) no siguen esta regla: pueden ir apilados porque no dependen del orden.
 struct TrigBoard {
-    double left, top, dx, dy; int cols; int k = 0;
-    TrigBoard(double l, double t, int c = 20, double ddx = 48.0, double ddy = 52.0) : left(l), top(t), dx(ddx), dy(ddy), cols(c) {}
-    void at(double& x, double& y) { x = left + (k % cols) * dx; y = top + (k / cols) * dy; ++k; }
-    void newBlock() { if (k % cols) k += cols - (k % cols); }          // siguiente fila
-    double nextY() const { return top + double((k + cols - 1) / cols + 1) * dy; }
+    double left, top, dx; int k = 0;
+    TrigBoard(double l, double t, double ddx = 30.0) : left(l), top(t), dx(ddx) {}
+    void at(double& x, double& y) { x = left + k * dx; y = top; ++k; }
+    void newBlock() {}                                               // sin huecos: la fila es continua
+    double rowY() const { return top; }
+    double nextY() const { return top + 60.0; }                      // base para los Color triggers (debajo de la fila)
 };
+// x inicial de la fila: a la derecha de los triggers de arranque (trigX - 30 y trigX) y no antes del borde izquierdo de la imagen
+inline double rowLeft(double imageLeft, double trigX) { return std::max(imageLeft, trigX + 60.0); }
 } // namespace detail
 
 constexpr int kGifTriggersPerFrame = 4;
@@ -215,7 +219,7 @@ inline std::string buildGifString(const std::vector<Result>& results, const GifP
     // --- triggers: cuadricula encima de la imagen (la posicion no importa para los spawn-triggered)
     const Result& r0 = results[0];
     GdSize sz = gdImageSize(r0, p.eo);
-    detail::TrigBoard board(p.eo.originX - sz.w * 0.5, p.eo.originY + sz.h * 0.5 + 90.0);
+    detail::TrigBoard board(detail::rowLeft(p.eo.originX - sz.w * 0.5, p.trigX), p.eo.originY + sz.h * 0.5 + 90.0);
     auto pos = [&](double& x, double& y) { board.at(x, y); };
     double x, y;
 
@@ -246,8 +250,8 @@ inline std::string buildGifString(const std::vector<Result>& results, const GifP
     board.newBlock();
     // arranque (triggers de posicion): lanzan L e I
     double sx = p.trigX, sy = board.nextY();
-    detail::addSpawn(out, p, sx, sy, L, 0, 0);
-    detail::addSpawn(out, p, sx, sy + 52.0, I, 0, 0);
+    detail::addSpawn(out, p, sx, board.rowY(), L, 0, 0);          // arranque en la fila de triggers, a la izquierda de la imagen
+    detail::addSpawn(out, p, sx - 30.0, board.rowY(), I, 0, 0);   // I justo a la izquierda de L: nunca encima/debajo de otro
 
     if (!out.empty() && out.back() == ';') out.pop_back();
     return out;

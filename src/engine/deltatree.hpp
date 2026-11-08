@@ -322,7 +322,7 @@ inline std::string buildTreeString(const LayeredAnim& a, const GifPlan& plan, co
     for (int i = 0; i < N; ++i) emit(a.patches[size_t(i)], gLayer[size_t(i)], a.zNode[size_t(i)]);
 
     GdSize sz = gdImageSize(a.still, p.eo);
-    detail::TrigBoard board(p.eo.originX - sz.w * 0.5, p.eo.originY + sz.h * 0.5 + 90.0);
+    detail::TrigBoard board(detail::rowLeft(p.eo.originX - sz.w * 0.5, p.trigX), p.eo.originY + sz.h * 0.5 + 90.0);
     auto pos = [&](double& x, double& y) { board.at(x, y); };
     double x, y, t = 0;
     for (int i = 0; i < N; ++i) {                               // bucle L
@@ -341,8 +341,8 @@ inline std::string buildTreeString(const LayeredAnim& a, const GifPlan& plan, co
     if (hasI) for (int l : S.initHide) { pos(x, y); detail::addAlpha(out, p, x, y, gLayer[size_t(l)], 0, I); }
     board.newBlock();
     double sx = p.trigX, sy = board.nextY();
-    detail::addSpawn(out, p, sx, sy, L, 0, 0);
-    if (hasI) detail::addSpawn(out, p, sx, sy + 52.0, I, 0, 0);
+    detail::addSpawn(out, p, sx, board.rowY(), L, 0, 0);          // arranque en la fila de triggers, a la izquierda de la imagen
+    if (hasI) detail::addSpawn(out, p, sx - 30.0, board.rowY(), I, 0, 0);   // I justo a la izquierda de L: nunca encima/debajo de otro
     if (useCh) {
         for (size_t i = 0; i < a.palette.size(); ++i) {
             const double cx = p.trigX - 48.0 * double(1 + int(i) % 20), cy = sy + 90.0 + 52.0 * double(int(i) / 20);

@@ -3,7 +3,7 @@
 //  Coloca ~100 objetos con el MISMO exportador que usa el mod y que prueban, por separado, como dibuja GD:
 //    Fila 1  orden de dibujo por z-order (rojo vs azul solapados): z distintos, creacion en orden inverso, z muy altos y EMPATES
 //    Fila 2  rotacion con escala no uniforme (franja 40x5 girada 0,30,60,90,120,150) sobre un cuadrado gris de referencia
-//    Fila 3  base + franja girada encima (lo que hacen los metodos 7/8/18/19), creada antes / despues, y franjas finas
+//    Fila 3  (derecha: z=0 frente a z=1)  base + franja girada encima (lo que hacen los metodos 7/8/18/19), creada antes / despues, y franjas finas
 //    Fila 4  tamanos diminutos (alto 6, 3, 1.5, 0.75, 0.4, 0.2 unidades)
 //    Fila 5  teselado sub-unidad: 60 tiras de 0.5 u forman un degradado continuo (si hay huecos/bandas, GD redondea posiciones/escalas)
 //    Fila 6  canales de color 2,3,4,5 (rojo, verde, azul, amarillo) con Color triggers, junto a los mismos colores en HSV
@@ -41,6 +41,10 @@ inline CalibResult buildCalibration(GdExportOptions eo, double trigX) {
     add(125, 92, 36, 36, 0, GRAY, 1);   add(125, 92, 50, 1, 45, GREEN, 2);         // franja de 1 u
     add(175, 92, 36, 36, 0, GRAY, 1);   add(175, 92, 50, 0.5f, 45, GREEN, 2);      // franja de 0.5 u
     add(225, 92, 36, 36, 0, GRAY, 1);   for (int j = 0; j < 8; ++j) add(225.f, 92.f - 14 + 4 * j, 34, 1.5f, 20.f * (j % 3), j % 2 ? GREEN : BLACK, 2 + j);   // 8 franjas apiladas
+    // Fila 3 (derecha): z-order 0 frente a 1. Esperado: el AZUL (z=1) encima del rojo (z=0) en los dos casos.
+    // Si el ROJO queda encima, GD trata z=0 como \"por defecto\" y lo dibuja sobre los z>=1 (error que tenian los metodos 7/8).
+    add(278, 92, 20, 20, 0, RED, 0);  add(286, 92, 20, 20, 0, BLUE, 1);        // rojo(0) creado primero
+    add(310, 92, 20, 20, 0, BLUE, 1); add(302, 92, 20, 20, 0, RED, 0);         // azul(1) creado primero
     // Fila 4: tamanos diminutos
     const float hs[6] = {6, 3, 1.5f, 0.75f, 0.4f, 0.2f};
     for (int k = 0; k < 6; ++k) add(25.f + 50.f * k, 118, 8, hs[k], 0, BLACK, 1);
@@ -53,7 +57,7 @@ inline CalibResult buildCalibration(GdExportOptions eo, double trigX) {
     // Los mismos 4 colores en HSV, a la derecha
     for (int k = 0; k < 4; ++k) { Shape s; s.cx = 225.f + 24.f * k; s.cy = 143; s.w = 20; s.h = 14; s.r = cr.palette[size_t(k)][0]; s.g = cr.palette[size_t(k)][1]; s.b = cr.palette[size_t(k)][2]; s.z = 1; A.shapes.push_back(s); }
 
-    eo.longSide = 320; eo.zBase = 0; eo.groupStr.clear(); eo.monoFastPath = false; eo.bleed = 0.15;
+    eo.longSide = 320; eo.zBase = 0; eo.zShift = 0; eo.groupStr.clear(); eo.monoFastPath = false; eo.bleed = 0.15;   // zShift 0: z CRUDO (para probar el 0)
     GdExportOptions eoA = eo;                                    // HSV (misma ruta que los metodos normales)
     std::string sA = toGdString(A, eoA);
     GdExportOptions eoB = eo; eoB.originY = eo.originY - (150 * 0.5 + 12 + 20 * 0.5);

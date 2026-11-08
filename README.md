@@ -78,7 +78,9 @@ Notas: la calidad sube de forma continua con el presupuesto (medido de 500 a 400
 
 Los triggers de arranque estan por defecto en x = -30: solo se ejecutan si juegas **desde el inicio del nivel**. Si pruebas con *Playtest desde la posicion del editor* o un Start Pos mas a la derecha, desactiva *Triggers de arranque en el inicio* para que queden junto a la imagen.
 
-| Triggers "amontonados" en el editor | Cuadricula de 30 x 30 u: el icono mide ~30 u y lleva etiqueta arriba y numeros abajo, asi que se pisaban (446-781 pares) | `detail::TrigBoard`: separacion 48 x 52 u, 20 columnas y un bloque por funcion (bucle / mostrar-ocultar / inicio) con una fila libre entre bloques, a 90 u de la imagen; 0 pares solapados (la prueba lo exige). **Ojo:** la posicion de un trigger *spawn-triggered* no afecta a su funcionamiento: esto mejora la legibilidad; si en el juego los frames se superponen, el motivo es otro (ver *Modo al colocar*). |
+| Triggers pisados / frames "amalgamados" | Triggers de frames en cuadricula (v0.4.4) | **Una sola fila, uno tras otro hacia la derecha** (paso 30 u, sin huecos); ninguno encima/debajo de otro. GD ejecuta los triggers de un mismo instante de izquierda a derecha, asi el orden de x es el orden de los frames. Solo los Color triggers pueden ir apilados. La prueba lo exige. |
+
+| Metodos 7/8 (y 4/18/19) se ven como el BSP grueso en el juego (bloques planos, sin detalle) aunque el preview es bueno | **z-order 0 = "por defecto" en GD**: se dibuja encima de los z 1..N, asi la base (z=0) tapaba todos los rectangulos girados | Nunca se emite z = 0: todo z se desplaza +1 (`zShift`). La prueba falla si aparece un z <= 0. Confirmable con el patron de calibracion (fila 3, derecha). |
 
 Regla para metodos futuros: pasar siempre por `convert()` (o llamar a `sanitizeResult`), y ejecutar `tests/sanity_test.cpp`.
 
@@ -99,3 +101,6 @@ Ajuste **Modo al colocar -> Patron de calibracion**: al pulsar *Colocar* se colo
 * Las claves de triggers (Alpha 1007: 51/35/10; Spawn 1268: 51/63/62/87; grupos 57) siguen el formato estandar de 2.2 pero no estan probadas en GD.
 * Cada frame se convierte por separado (metodos 1-17): puede haber parpadeo entre frames. Los metodos 18 y 19 lo reducen mucho (fondo trazado una vez).
 * Retardos < 0.03 s se suben a 0.03 s (ajustable).
+
+## Herramienta: ver un .gmd sin abrir GD
+`python3 tools/gmd_view.py nivel.gmd` resume el nivel (objetos por id, z-orders, ¿hay z=0?, orden de los triggers) y con `-o vista.png [--group N] [--zero-default 12]` dibuja los objetos 3092 del mod. Exporta el nivel desde GD (.gmd) y subelo para diagnosticar.

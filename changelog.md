@@ -1,3 +1,15 @@
+# v0.4.5-beta
+- FIX (metodos 7 y 8, tambien 4/18/19): GD trata el z-order **0** como "z por defecto del objeto" y lo dibuja ENCIMA de los z 1..N. La base BSP
+  (z = 0) tapaba todos los rectangulos girados y en el juego solo se veia el BSP grueso (con 500 objetos: bloques planos, sin ojos ni detalle).
+  Ahora **nunca se emite z = 0** (todo z se desplaza +1; `GdExportOptions::zShift`). Reproducido con tus capturas M7/M8: el resultado simulado de la
+  cadena vieja es identico a lo que se veia en GD y el de la nueva cadena es igual a la vista previa.
+- REVERTIDO el reparto de triggers de la v0.4.4: ahora van en **una sola fila, uno tras otro hacia la derecha** (paso 30 u, sin huecos), ninguno encima
+  ni debajo de otro. Los de arranque (I a la izquierda de L) tambien en la misma fila, fuera del rango x de los demas. Solo los Color triggers pueden
+  ir apilados.
+- Patron de calibracion: nueva prueba z=0 frente a z=1 (fila 3, derecha; **z crudo**, sin el desplazamiento). Esperado: el azul (z=1) encima del rojo.
+- sanity_test: falla si se emite z <= 0 (comprobado contra el codigo anterior) y si los triggers no van estrictamente a la derecha en una fila.
+- Nueva herramienta `tools/gmd_view.py`: lee .gmd, resume el nivel y dibuja los objetos 3092 (escala/giro/color/z) para diagnosticar sin abrir GD.
+
 # v0.4.4-beta
 - Nuevo modo al colocar "Patron de calibracion" (+ `calibracion_esperado.png`): prueba por separado z-order, rotacion, tamanos minimos, precision sub-unidad y canales de color en GD.
 - Triggers ordenados: 48 x 52 u, 20 columnas, un bloque por funcion; 0 solapes (antes 446-781 pares). Color triggers tambien separados.

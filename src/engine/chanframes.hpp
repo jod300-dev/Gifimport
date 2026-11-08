@@ -86,7 +86,7 @@ inline std::string buildGifStringCh(const std::vector<Result>& results, const Gi
     }
     const Result& r0 = results[0];
     GdSize sz = gdImageSize(r0, p.eo);
-    detail::TrigBoard board(p.eo.originX - sz.w * 0.5, p.eo.originY + sz.h * 0.5 + 90.0);
+    detail::TrigBoard board(detail::rowLeft(p.eo.originX - sz.w * 0.5, p.trigX), p.eo.originY + sz.h * 0.5 + 90.0);
     auto pos = [&](double& x, double& y) { board.at(x, y); };
     double x, y, t = 0;
     for (int i = 0; i < N; ++i) { pos(x, y); detail::addSpawn(out, p, x, y, F0 + i, t, L); t += plan.delay[size_t(i)]; }
@@ -101,8 +101,8 @@ inline std::string buildGifStringCh(const std::vector<Result>& results, const Gi
     for (int i = 1; i < N; ++i) { pos(x, y); detail::addAlpha(out, p, x, y, G0 + i, 0, I); }
     board.newBlock();
     double sx = p.trigX, sy = board.nextY();
-    detail::addSpawn(out, p, sx, sy, L, 0, 0);
-    detail::addSpawn(out, p, sx, sy + 52.0, I, 0, 0);
+    detail::addSpawn(out, p, sx, board.rowY(), L, 0, 0);          // arranque en la fila de triggers, a la izquierda de la imagen
+    detail::addSpawn(out, p, sx - 30.0, board.rowY(), I, 0, 0);   // I justo a la izquierda de L: nunca encima/debajo de otro
     appendColorTriggers(out, palette, kFirstColorChannel, p.trigX, sy);
     if (!out.empty() && out.back() == ';') out.pop_back();
     return out;

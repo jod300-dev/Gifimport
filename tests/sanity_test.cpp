@@ -6,6 +6,8 @@
 //   5. editor limpio: el frame 0 esta por encima del resto (z-order mayor)
 //   5b. ningun par de formas que se solapan de verdad (SAT, geometria continua) comparte z: en GD los empates NO tienen orden garantizado
 //   5c. hoja de frames: sin grupos ni triggers, cada frame dentro de su casilla
+//   5d. NUNCA se emite z-order 0 (GD lo trata como \"por defecto\" y lo dibuja ENCIMA de los z>=1: tapaba los rotados de 7/8/18/19)
+//   5e. triggers de frames en UNA fila, uno tras otro hacia la derecha, sin ninguno encima/debajo de otro
 //   6. metodos 18/19: igual sobre cada capa
 //   g++ -O2 -std=c++20 -pthread -Iinclude -Isrc/engine tests/sanity_test.cpp -o sanity_test && ./sanity_test tests/test.gif
 #define STB_IMAGE_IMPLEMENTATION
@@ -24,18 +26,31 @@ static std::vector<std::map<int, std::string>> parse(const std::string& s) {
     while (std::getline(ss, item, ';')) { std::map<int, std::string> kv; std::stringstream is(item); std::string a, b; while (std::getline(is, a, ',') && std::getline(is, b, ',')) kv[std::stoi(a)] = b; v.push_back(kv); }
     return v;
 }
-// triggers spawn-triggered (iconos ~30 u + etiqueta/numeros = caja 40 x 44) que se pisan entre si
+// Triggers de frames: UNA fila, uno tras otro hacia la derecha. Cuenta (a) pares que comparten x (uno encima/debajo de otro),
+// (b) pasos hacia atras o con distinta y en el orden de creacion. Los Color triggers (id 899) estan exentos.
 static int triggerOverlaps(const std::string& s) {
     std::vector<std::pair<double, double>> pts;
     for (auto& kv : parse(s)) {
+        if (!kv.count(1)) continue;
         int id = std::stoi(kv.at(1));
-        if ((id != 1007 && id != 1268) || !kv.count(62)) continue;
+        if (id != 1007 && id != 1268) continue;
         pts.push_back({std::stod(kv.at(2)), std::stod(kv.at(3))});
     }
-    int ov = 0;
+    int bad = 0;
     for (size_t i = 0; i < pts.size(); ++i) for (size_t j = i + 1; j < pts.size(); ++j)
-        if (std::abs(pts[i].first - pts[j].first) < 40 && std::abs(pts[i].second - pts[j].second) < 44) ++ov;
-    return ov;
+        if (std::abs(pts[i].first - pts[j].first) < 29.0) ++bad;          // misma columna (o solape horizontal)
+    // orden de creacion: los de spawn-triggered van estrictamente de izquierda a derecha en la misma fila
+    double lastX = -1e18, rowY = 0; bool first = true;
+    for (auto& kv : parse(s)) {
+        if (!kv.count(1)) continue;
+        int id = std::stoi(kv.at(1));
+        if ((id != 1007 && id != 1268) || !kv.count(62)) continue;
+        double x = std::stod(kv.at(2)), y = std::stod(kv.at(3));
+        if (first) { rowY = y; first = false; }
+        if (x <= lastX || std::abs(y - rowY) > 0.01) ++bad;
+        lastX = x;
+    }
+    return bad;
 }
 
 // pares que se solapan (> 0.1 px) y comparten z: en GD su orden relativo seria arbitrario
@@ -89,6 +104,7 @@ int main(int argc, char** argv) {
                 if (x - ex < p.eo.originX - sz.w * 0.5 - tol || x + ex > p.eo.originX + sz.w * 0.5 + tol || y - ey < p.eo.originY - sz.h * 0.5 - tol || y + ey > p.eo.originY + sz.h * 0.5 + tol) { fail("metodo " + std::to_string(m + 1) + ": objeto exportado fuera de la imagen"); break; }
                 if (w <= 0 || h <= 0) { fail("metodo " + std::to_string(m + 1) + ": escala no positiva"); break; }
                 int grp = std::stoi(kv.at(57)), z = std::stoi(kv.at(25));
+                if (z <= 0) { fail("metodo " + std::to_string(m + 1) + ": se emitio z-order " + std::to_string(z) + " (GD lo trata como por defecto y lo dibuja encima)"); break; }
                 if (grp == p.baseGroup) zf0 = std::max<double>(zf0, z); else zOthers = std::max<double>(zOthers, z);
             }
             if (!res[0].shapes.empty() && zOthers > -1e8 && !(zf0 > zOthers)) fail("metodo " + std::to_string(m + 1) + ": el frame 0 no queda encima en el editor");
@@ -117,6 +133,7 @@ int main(int argc, char** argv) {
         GdSize sz = gdImageSize(A.still, p.eo);
         for (auto& kv : parse(str)) {
             if (std::stoi(kv.at(1)) != p.eo.objectId) continue;
+            if (std::stoi(kv.at(25)) <= 0) { fail(tag + ": se emitio z-order <= 0"); break; }
             double x = std::stod(kv.at(2)), y = std::stod(kv.at(3)), w = std::stod(kv.at(128)), h = std::stod(kv.at(129));
             double rot = kv.count(6) ? std::stod(kv.at(6)) : 0.0, rad = rot * 3.14159265358979 / 180.0;
             double ex = std::abs(w * 0.5 * std::cos(rad)) + std::abs(h * 0.5 * std::sin(rad)), ey = std::abs(w * 0.5 * std::sin(rad)) + std::abs(h * 0.5 * std::cos(rad));
@@ -141,7 +158,7 @@ int main(int argc, char** argv) {
                 int id = std::stoi(kv.at(1));
                 if (id == 899) { ++trig; if (std::stoi(kv.at(23)) < 2) ch1 = true; continue; }
                 if (id != p.eo.objectId) { fail("hoja: objeto inesperado id " + std::to_string(id) + " (no debe haber triggers)"); break; }
-                ++shapesOut; if (kv.count(57)) grp = true; if (useCh && (!kv.count(21) || std::stoi(kv.at(21)) < 2)) ch1 = true;
+                if (std::stoi(kv.at(25)) <= 0) fail("hoja: z-order <= 0"); ++shapesOut; if (kv.count(57)) grp = true; if (useCh && (!kv.count(21) || std::stoi(kv.at(21)) < 2)) ch1 = true;
                 double x = std::stod(kv.at(2)), y = std::stod(kv.at(3));
                 int col = int(std::floor((x - (p.eo.originX - sz.w * 0.5) + 0.5) / (sz.w + gap))), row = int(std::floor(((p.eo.originY + sz.h * 0.5) - y) / (sz.h + gap)));
                 if (col < 0 || col >= cols || row < 0 || row > int(res.size()) / cols) { fail("hoja: objeto fuera de la cuadricula"); break; }
@@ -152,7 +169,7 @@ int main(int argc, char** argv) {
             ++checks;
         }
     }
-    // patron de calibracion: cadena bien formada, 111 objetos HSV + 4 de canal (2..5) + 4 Color triggers, z=300 presente, sin canal 1
+    // patron de calibracion: cadena bien formada, 115 objetos HSV + 4 de canal (2..5) + 4 Color triggers, z=300 presente, sin canal 1
     {
         GdExportOptions eo; eo.originX = 1000; eo.originY = 500;
         auto cr = buildCalibration(eo, -30);
@@ -168,7 +185,7 @@ int main(int argc, char** argv) {
             if (!kv.count(2) || !kv.count(3) || !kv.count(128) || !kv.count(129)) ++malformed;
         }
         if (malformed) fail("calibracion: " + std::to_string(malformed) + " objetos mal formados");
-        if (hsv != 111 || chs != 4) fail("calibracion: numero de objetos inesperado (HSV " + std::to_string(hsv) + ", canal " + std::to_string(chs) + ")");
+        if (hsv != 115 || chs != 4) fail("calibracion: numero de objetos inesperado (HSV " + std::to_string(hsv) + ", canal " + std::to_string(chs) + ")");
         if (trig != 4 || chans != std::set<int>({2, 3, 4, 5})) fail("calibracion: Color triggers/canales incorrectos");
         if (zmax < 300) fail("calibracion: falta el z-order 300"); if (bad1) fail("calibracion: usa canal < 2");
         ++checks;
