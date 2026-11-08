@@ -4,12 +4,15 @@
 //   3. nunca mas formas que el presupuesto
 //   4. en la CADENA exportada: todo objeto dentro del rectangulo de la imagen (+ solape), escalas > 0, ids/grupos validos
 //   5. editor limpio: el frame 0 esta por encima del resto (z-order mayor)
+//   5b. ningun par de formas que se solapan de verdad (SAT, geometria continua) comparte z: en GD los empates NO tienen orden garantizado
+//   5c. hoja de frames: sin grupos ni triggers, cada frame dentro de su casilla
 //   6. metodos 18/19: igual sobre cada capa
 //   g++ -O2 -std=c++20 -pthread -Iinclude -Isrc/engine tests/sanity_test.cpp -o sanity_test && ./sanity_test tests/test.gif
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_NO_STDIO
 #include "chanframes.hpp"
 #include "deltatree.hpp"
+#include "sheet.hpp"
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -19,6 +22,18 @@ static std::vector<std::map<int, std::string>> parse(const std::string& s) {
     while (std::getline(ss, item, ';')) { std::map<int, std::string> kv; std::stringstream is(item); std::string a, b; while (std::getline(is, a, ',') && std::getline(is, b, ',')) kv[std::stoi(a)] = b; v.push_back(kv); }
     return v;
 }
+// pares que se solapan (> 0.1 px) y comparten z: en GD su orden relativo seria arbitrario
+static long tiedOverlaps(const std::vector<Shape>& sh) {
+    long n = 0;
+    for (size_t i = 0; i < sh.size(); ++i)
+        for (size_t j = i + 1; j < sh.size(); ++j) {
+            if (sh[i].z != sh[j].z) continue;
+            if (std::abs(sh[i].cx - sh[j].cx) > 90 || std::abs(sh[i].cy - sh[j].cy) > 90) continue;
+            if (rectPenetration(sh[i], sh[j]) > 0.1) ++n;
+        }
+    return n;
+}
+
 int main(int argc, char** argv) {
     std::ifstream f(argc > 1 ? argv[1] : "tests/test.gif", std::ios::binary);
     std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)), {});
@@ -39,6 +54,7 @@ int main(int argc, char** argv) {
                 if (worst > 0.2) fail("metodo " + std::to_string(m + 1) + ": forma fuera del lienzo por " + std::to_string(worst) + " px");
                 int mz = 0; for (auto& s : r.shapes) mz = std::max<int>(mz, s.z);
                 if (!r.mono && mz > 64) fail("metodo " + std::to_string(m + 1) + ": z-order disperso (max " + std::to_string(mz) + ")");
+                if (i == 0 && !r.mono) { long ties = tiedOverlaps(r.shapes); if (ties) fail("metodo " + std::to_string(m + 1) + ": " + std::to_string(ties) + " pares solapados con el mismo z"); }
             }
             // cadena exportada (HSV): dentro del rectangulo de la imagen
             GifExportParams p; p.baseGroup = 10; p.eo.longSide = 300; p.eo.originX = 1000; p.eo.originY = 500;
@@ -74,6 +90,7 @@ int main(int argc, char** argv) {
             if (worst > 0.2) fail(tag + " " + nm + ": forma fuera del lienzo por " + std::to_string(worst) + " px");
             int mz = 0; for (auto& s : r.shapes) mz = std::max<int>(mz, s.z);
             if (mz > 128) fail(tag + " " + nm + ": z-order disperso");
+            long ties = tiedOverlaps(r.shapes); if (ties) fail(tag + " " + nm + ": " + std::to_string(ties) + " pares solapados con el mismo z");
         };
         chk(A.still, "fondo"); for (auto& r : A.rests) chk(r, "rest"); for (auto& r : A.patches) chk(r, "parche");
         GifExportParams p; p.baseGroup = 10; p.eo.longSide = 300; p.eo.originX = 1000; p.eo.originY = 500;
@@ -89,6 +106,33 @@ int main(int argc, char** argv) {
             if (x - ex < p.eo.originX - sz.w * 0.5 - tol || x + ex > p.eo.originX + sz.w * 0.5 + tol || y - ey < p.eo.originY - sz.h * 0.5 - tol || y + ey > p.eo.originY + sz.h * 0.5 + tol) { fail(tag + ": objeto exportado fuera de la imagen"); break; }
         }
         ++checks;
+    }
+    // hoja de frames (diagnostico): sin grupos ni triggers; cada frame dentro de su casilla
+    {
+        Options o; o.budget = 300; o.maxRaster = 256; o.quality = 0; o.lightSpecialChannels = true; o.maxChannels = 0;
+        auto res = convertFrames(g, plan, Method::BSP, o, nullptr, 2);
+        for (int useCh = 0; useCh < 2; ++useCh) {
+            std::vector<std::array<uint8_t, 3>> pal; auto frames = res;
+            if (useCh) pal = quantizeFrames(frames, 32);
+            GifExportParams p; p.baseGroup = 10; p.eo.longSide = 300; p.eo.originX = 1000; p.eo.originY = 500;
+            std::string err, s = buildFrameSheet(frames, p, pal, kFirstColorChannel, false, &err);
+            if (s.empty()) { fail("hoja: cadena vacia " + err); continue; }
+            size_t shapesOut = 0, trig = 0; bool grp = false, ch1 = false;
+            GdSize sz = gdImageSize(res[0], p.eo); const int cols = std::clamp(int(std::ceil(std::sqrt(double(res.size())))), 1, 8); const double gap = sz.w * 0.12;
+            for (auto& kv : parse(s)) {
+                int id = std::stoi(kv.at(1));
+                if (id == 899) { ++trig; if (std::stoi(kv.at(23)) < 2) ch1 = true; continue; }
+                if (id != p.eo.objectId) { fail("hoja: objeto inesperado id " + std::to_string(id) + " (no debe haber triggers)"); break; }
+                ++shapesOut; if (kv.count(57)) grp = true; if (useCh && (!kv.count(21) || std::stoi(kv.at(21)) < 2)) ch1 = true;
+                double x = std::stod(kv.at(2)), y = std::stod(kv.at(3));
+                int col = int(std::floor((x - (p.eo.originX - sz.w * 0.5) + 0.5) / (sz.w + gap))), row = int(std::floor(((p.eo.originY + sz.h * 0.5) - y) / (sz.h + gap)));
+                if (col < 0 || col >= cols || row < 0 || row > int(res.size()) / cols) { fail("hoja: objeto fuera de la cuadricula"); break; }
+            }
+            size_t expect = 0; for (auto& r : res) expect += r.shapes.size();
+            if (grp) fail("hoja: hay objetos con grupo"); if (ch1) fail("hoja: usa el canal 1 o falta canal"); if (shapesOut != expect) fail("hoja: numero de objetos distinto");
+            if (useCh && trig != pal.size()) fail("hoja: color-triggers != paleta");
+            ++checks;
+        }
     }
     std::cout << checks << " comprobaciones: " << (bad ? std::to_string(bad) + " FALLOS\n" : std::string("TODO OK\n"));
     return bad ? 1 : 0;

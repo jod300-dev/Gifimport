@@ -1,3 +1,9 @@
+# v0.4.3-beta
+- FIX: formas solapadas con el mismo z-order (orden arbitrario en GD): el z-order ahora se compacta con solape geometrico exacto (SAT); 0 empates.
+- Bucle de triggers autocorregido: cada vuelta oculta de nuevo todo salvo el frame 0.
+- Nuevo ajuste "Modo al colocar": Animacion / Hoja de frames (sin triggers) / Solo el frame 0, para diagnosticar problemas en el juego.
+- sanity_test: comprueba empates de z y la hoja de frames; verificado que falla con el codigo anterior.
+
 # v0.4.2-beta
 - FIX: formas fuera del lienzo (astillas/halo alrededor de la imagen) en los metodos 7, 8, 9, 10, 12, 15, 16, 17, 18 y 19. `Geo` ya no las genera y `convert()` confina todo resultado (`sanitize.hpp`).
 - FIX: z-order compactado en todos los metodos (de ~1000 valores a decenas).

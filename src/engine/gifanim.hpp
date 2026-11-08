@@ -92,7 +92,7 @@ inline GifPlan planFrames(const GifData& g, int maxFrames, double speed, double 
 }
 
 constexpr int kGifTriggersPerFrame = 4;
-inline int gifTriggerCount(int frames) { return kGifTriggersPerFrame * frames + 2; }
+inline int gifTriggerCount(int frames) { return kGifTriggersPerFrame * frames + 3; }   // +1: Spawn(I) en cada vuelta
 inline int gifGroupCount(int frames) { return 2 * frames + 2; }
 
 // Objetos por frame que caben respetando el tope total (triggers incluidos).
@@ -217,6 +217,9 @@ inline std::string buildGifString(const std::vector<Result>& results, const GifP
     }
     pos(x, y);
     detail::addSpawn(out, p, x, y, L, plan.total, L);
+    // Autocorreccion: en cada vuelta se vuelve a ocultar todo salvo el frame 0, asi un trigger fallido no deja frames superpuestos.
+    pos(x, y);
+    detail::addSpawn(out, p, x, y, I, 0, L);
 
     // F_i: mostrar G_i, ocultar el frame anterior
     for (int i = 0; i < N; ++i) {

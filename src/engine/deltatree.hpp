@@ -80,7 +80,7 @@ inline Sched schedule(const LayeredAnim& a) {
     s.initHide = diff([&] { std::vector<int> all; for (int i = 0; i < N; ++i) if (s.layerOf[size_t(i)] >= 0) all.push_back(i); return all; }(), s.path[0]);
     const bool hasI = !s.initHide.empty();
     s.groups = s.nLayers + s.nSteps + 1 + (hasI ? 1 : 0);
-    s.triggers = s.nSteps + 1 + acts + int(s.initHide.size()) + 1 + (hasI ? 1 : 0) + int(a.palette.size());
+    s.triggers = s.nSteps + 1 + acts + int(s.initHide.size()) + 1 + (hasI ? 2 : 0) + int(a.palette.size());
     return s;
 }
 
@@ -331,6 +331,7 @@ inline std::string buildTreeString(const LayeredAnim& a, const GifPlan& plan, co
         t += plan.delay[size_t(i)];
     }
     pos(x, y); detail::addSpawn(out, p, x, y, L, plan.total, L);
+    if (hasI) { pos(x, y); detail::addSpawn(out, p, x, y, I, 0, L); }     // autocorreccion en cada vuelta
     for (int i = 0; i < N; ++i) {                               // pasos: ocultar lo que sale del camino, mostrar lo que entra
         const int F = gStep[size_t(i)]; if (F <= 0) continue;
         for (int l : S.hide[size_t(i)]) { pos(x, y); detail::addAlpha(out, p, x, y, gLayer[size_t(l)], 0, F); }

@@ -72,6 +72,12 @@ Analisis de lo visto en el juego (preview limpio, pero astillas / frames "amalga
 
 Notas: la calidad sube de forma continua con el presupuesto (medido de 500 a 4000 objetos/frame en todos los metodos): no hay valores "buenos" y "malos". Con *Lado largo* pequeno (p. ej. 210 u) los objetos miden <1 unidad: sube el lado largo si se ve borroso.
 
+| Orden arbitrario entre formas con el mismo z | En GD las formas con el mismo z-order NO tienen orden garantizado (depende de como entran a pantalla). La compactacion anterior detectaba solapes por centros de pixel y dejaba 39-90 pares por frame (trazos finos) empatados | `compactZ` usa solape **geometrico exacto (SAT)**: ningun par solapado comparte z (0 empates; la prueba lo exige y falla con el codigo anterior). |
+| Frames superpuestos si un trigger falla una vez | Un `hide` perdido deja dos frames visibles hasta el final | En cada vuelta el bucle vuelve a ejecutar el grupo de inicio (oculta todo salvo el frame 0): se autocorrige (+1 trigger). |
+| No saber si el fallo es de la conversion o de los triggers | — | Ajuste **Modo al colocar**: *Hoja de frames* (todos los frames lado a lado, objetos estaticos, sin triggers) o *Solo el frame 0*. |
+
+Los triggers de arranque estan por defecto en x = -30: solo se ejecutan si juegas **desde el inicio del nivel**. Si pruebas con *Playtest desde la posicion del editor* o un Start Pos mas a la derecha, desactiva *Triggers de arranque en el inicio* para que queden junto a la imagen.
+
 Regla para metodos futuros: pasar siempre por `convert()` (o llamar a `sanitizeResult`), y ejecutar `tests/sanity_test.cpp`.
 
 ## NO verificado

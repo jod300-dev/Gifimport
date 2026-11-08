@@ -659,6 +659,38 @@ void GifPopup::finishBuild(std::shared_ptr<BuildJob> job) {
         p.trigX = origin.x - gdx::gdImageSize(job->results[0], p.eo).w * 0.5 - 30.0;
     }
 
+    // Modo de diagnostico: objetos estaticos, SIN triggers (hoja de frames o solo el frame 0).
+    {
+        const std::string pm = mod->getSettingValue<std::string>("place-mode");
+        const bool sheet = pm.rfind("Hoja", 0) == 0, solo = pm.rfind("Solo", 0) == 0;
+        if (sheet || solo) {
+            std::vector<gdx::Result> frames;
+            std::vector<std::array<uint8_t, 3>> pal;
+            int firstCh = gdx::kFirstColorChannel;
+            if (job->layered && job->layered->ok()) {
+                for (int f = 0; f < job->layered->frames; ++f) frames.push_back(gdx::animFrameResult(*job->layered, f));
+                pal = job->layered->palette; firstCh = job->layered->firstChannel;
+            } else {
+                frames = job->results;
+                if (job->useCh) pal = job->palette;
+            }
+            std::string e2;
+            std::string s2 = gdx::buildFrameSheet(frames, p, pal, firstCh, solo, &e2);
+            if (s2.empty()) {
+                FLAlertLayer::create("GIF Importer", e2.empty() ? "No se pudo generar la hoja de frames." : e2.c_str(), "OK")->show();
+                this->applyPreview(nullptr);
+                return;
+            }
+            CCArray* made = lel->createObjectsFromString(s2.c_str(), true, true);
+            if (made && made->count() > 0 && mod->getSettingValue<bool>("select-after") && m_editor) m_editor->selectObjects(made, true);
+            char m2[128];
+            std::snprintf(m2, sizeof m2, solo ? "Frame 0 colocado (sin triggers)" : "Hoja de %d frames colocada (sin triggers)", int(frames.size()));
+            Notification::create(m2, NotificationIcon::Success, 3.5f)->show();
+            this->onClose(nullptr);
+            return;
+        }
+    }
+
     std::string err;
     const bool isLay = job->layered != nullptr;
     if (isLay && !job->layered->ok() && err.empty()) err = "No se pudieron calcular las capas";

@@ -92,6 +92,7 @@ inline std::string buildGifStringCh(const std::vector<Result>& results, const Gi
     double x, y, t = 0;
     for (int i = 0; i < N; ++i) { pos(x, y); detail::addSpawn(out, p, x, y, F0 + i, t, L); t += plan.delay[size_t(i)]; }
     pos(x, y); detail::addSpawn(out, p, x, y, L, plan.total, L);
+    pos(x, y); detail::addSpawn(out, p, x, y, I, 0, L);                 // autocorreccion en cada vuelta
     for (int i = 0; i < N; ++i) {
         pos(x, y); detail::addAlpha(out, p, x, y, G0 + i, 1, F0 + i);
         pos(x, y); detail::addAlpha(out, p, x, y, G0 + (i + N - 1) % N, 0, F0 + i);

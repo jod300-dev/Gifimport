@@ -829,7 +829,7 @@ inline LayeredSchedule scheduleLayered(const LayeredAnim& a) {
     const bool hasI = !s.initHidePatch.empty() || !s.initHideRest.empty();
     int acts = 0; for (auto& st : s.step) acts += st.actions();
     s.groups = s.nRests + s.nPatches + s.nSteps + 1 + (hasI ? 1 : 0);
-    s.triggers = s.nSteps + 1 + acts + int(s.initHidePatch.size() + s.initHideRest.size()) + 1 + (hasI ? 1 : 0) + int(a.palette.size());     // + un Color trigger por canal
+    s.triggers = s.nSteps + 1 + acts + int(s.initHidePatch.size() + s.initHideRest.size()) + 1 + (hasI ? 1 : 0) + (hasI ? 1 : 0) + int(a.palette.size());     // + Spawn(I) por vuelta + un Color trigger por canal
     return s;
 }
 
@@ -896,6 +896,7 @@ inline std::string buildLayeredString(const LayeredAnim& a, const GifPlan& plan,
         t += plan.delay[size_t(i)];
     }
     pos(x, y); detail::addSpawn(out, p, x, y, L, plan.total, L);
+    if (hasI) { pos(x, y); detail::addSpawn(out, p, x, y, I, 0, L); }     // autocorreccion en cada vuelta
 
     for (int i = 0; i < N; ++i) {                              // pasos F_i
         const LayerStep& st = S.step[size_t(i)];
