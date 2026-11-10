@@ -83,13 +83,21 @@ def summary(objs):
         print('z-orders de los 3092:', dict(sorted(z.items())[:20]), '...' if len(z) > 20 else '')
         if z.get(0):
             print('  AVISO: hay objetos con z-order 0 (GD lo trata como "por defecto" y puede dibujarlos encima de los z>=1)')
-    trig = [d for d in objs if d['1'] in ('1007', '1268')]
-    sp = [d for d in trig if '62' in d]
-    if sp:
+    for name, tid in (('Alpha', '1007'), ('Spawn', '1268')):
+        sp = [d for d in objs if d['1'] == tid and '62' in d]          # spawn-triggered (los de frames)
+        if not sp:
+            continue
         xs = [f(d, '2') for d in sp]; ys = {round(f(d, '3'), 1) for d in sp}
         dup = [x for x, c in collections.Counter(round(x, 1) for x in xs).items() if c > 1]
         mono = all(b > a for a, b in zip(xs, xs[1:]))
-        print(f'triggers spawn-triggered: {len(sp)}  filas(y): {len(ys)}  x repetidas: {len(dup)}  x estrictamente creciente en orden de creacion: {mono}')
+        print(f'{name} (spawn-triggered): {len(sp)}  filas(y): {sorted(ys)}  x repetidas: {len(dup)}  x estrictamente creciente en orden de creacion: {mono}')
+    start = [d for d in objs if d['1'] == '1268' and '62' not in d]
+    if start:
+        print('Spawn de arranque (posicion):', [(round(f(d, '2'), 1), round(f(d, '3'), 1)) for d in start])
+    first_trig = next((i for i, d in enumerate(objs) if d['1'] in ('1007', '1268', '899')), None)
+    last_obj = max((i for i, d in enumerate(objs) if d['1'] == '3092'), default=None)
+    if first_trig is not None and last_obj is not None:
+        print('triggers ANTES que los objetos:', first_trig < last_obj, '(asi un recorte por el limite de objetos no los pierde)')
     groups = collections.Counter(g for d in objs if d['1'] == '3092' for g in d.get('57', '').split('.') if g)
     if groups:
         print('grupos con objetos 3092:', len(groups), '(mayores:', groups.most_common(3), ')')

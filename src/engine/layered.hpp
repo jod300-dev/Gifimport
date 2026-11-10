@@ -522,7 +522,7 @@ inline LayeredAnim buildLayered(const GifData& g, const GifPlan& plan, const Opt
     // --- raster de trabajo comun (limitado para no gastar demasiada memoria con muchos frames)
     int mr = std::clamp(base.maxRaster, 64, 1024), W, H;
     fitSize(g.w, g.h, mr, W, H);
-    while (int64_t(W) * H * N > 16000000LL && mr > 64) { mr = int(mr * 0.88); fitSize(g.w, g.h, mr, W, H); }
+    while (int64_t(W) * H * N > 9000000LL && mr > 64) { mr = int(mr * 0.88); fitSize(g.w, g.h, mr, W, H); }
     A.W = W; A.H = H; A.frames = N;
 
     std::vector<Image> orig; orig.resize(size_t(N));              // para medir el PSNR
@@ -641,16 +641,9 @@ inline LayeredAnim buildLayered(const GifData& g, const GifPlan& plan, const Opt
     report(prog, 0.14f);
     if (isCancelled(prog)) { A.cancelled = true; return A; }
 
-    // --- presupuesto total: los Color Triggers tambien cuentan dentro del tope.
+    // --- presupuesto total (igual que el metodo normal: perFrame x frames) y reparto
     const int trigEst = 4 * N + 2 * K + 8;
-    A.firstChannel = std::clamp(lo.firstChannel, 2, 998);
-    const int paletteBudget = lo.channels >= 2
-        ? std::clamp(std::min(lo.channels, lo.maxTotal - trigEst - 40), 0, 999 - A.firstChannel + 1)
-        : 0;
-    if (lo.channels >= 2 && paletteBudget < lo.channels)
-        A.note = "Paleta limitada a " + std::to_string(paletteBudget) + " canales para respetar el tope total.";
-    const double shapeLimit = std::max(40.0, double(lo.maxTotal) - trigEst - paletteBudget);
-    const double T = std::min(double(lo.perFrame) * N, shapeLimit);
+    const double T = std::max(40.0, std::min(double(lo.perFrame) * N, double(lo.maxTotal) - trigEst));
     A.budgetTotal = int(T);
     double Sest = double(W) * H * wt(N);
     for (int k = 0; k < K; ++k) Sest += a0[size_t(A.medoid[size_t(k)])] * wt(nUse[size_t(k)]);
@@ -736,8 +729,9 @@ inline LayeredAnim buildLayered(const GifData& g, const GifPlan& plan, const Opt
     for (int i = 0; i < N; ++i)                                                        // un parche vacio no se muestra
         if (A.patchOf[size_t(i)] >= 0 && A.patches[size_t(A.patchOf[size_t(i)])].shapes.empty()) A.patchOf[size_t(i)] = -1;
     // --- colores en canales: una paleta comun a todas las capas (cada color = un canal; el canal 1 nunca)
-    if (paletteBudget >= 2) {
-        const int K2 = paletteBudget;
+    A.firstChannel = std::clamp(lo.firstChannel, 2, 998);
+    if (lo.channels > 0) {
+        const int K2 = std::clamp(lo.channels, 2, 999 - A.firstChannel + 1);
         std::map<uint32_t, double> hist;
         auto addHist = [&](const Result& r) { for (auto& sh : r.shapes) hist[lay::colKey(sh.r, sh.g, sh.b)] += double(sh.w) * sh.h + 1.0; };
         addHist(A.still); for (auto& r : A.rests) addHist(r); for (auto& r : A.patches) addHist(r);
@@ -888,39 +882,41 @@ inline std::string buildLayeredString(const LayeredAnim& a, const GifPlan& plan,
     for (int k = 0; k < K; ++k) emit(a.rests[size_t(k)], gRest[size_t(k)], a.zRest);
     for (int i = 0; i < N; ++i) emit(a.patches[size_t(i)], gPatch[size_t(i)], a.zPatch);
 
-    // --- triggers
+    // --- triggers (se mueven al principio de la cadena al final: ver triggersFirst)
+    const size_t objEnd = out.size();
     GdSize sz = gdImageSize(a.still, p.eo);
     detail::TrigBoard board(detail::rowLeft(p.eo.originX - sz.w * 0.5, p.trigX), p.eo.originY + sz.h * 0.5 + 90.0);
-    auto pos = [&](double& x, double& y) { board.at(x, y); };
+    auto posA = [&](double& x, double& y) { board.atAlpha(x, y); };
+    auto posS = [&](double& x, double& y) { board.atSpawn(x, y); };
     double x, y;
 
     double t = 0;                                              // bucle L
     for (int i = 0; i < N; ++i) {
-        if (gStep[size_t(i)] > 0) { pos(x, y); detail::addSpawn(out, p, x, y, gStep[size_t(i)], t, L); }
+        if (gStep[size_t(i)] > 0) { posS(x, y); detail::addSpawn(out, p, x, y, gStep[size_t(i)], t, L); }
         t += plan.delay[size_t(i)];
     }
-    pos(x, y); detail::addSpawn(out, p, x, y, L, plan.total, L);
-    if (hasI) { pos(x, y); detail::addSpawn(out, p, x, y, I, 0, L); }     // autocorreccion en cada vuelta
+    posS(x, y); detail::addSpawn(out, p, x, y, L, plan.total, L);
+    if (hasI) { posS(x, y); detail::addSpawn(out, p, x, y, I, 0, L); }     // autocorreccion en cada vuelta
     board.newBlock();
 
     for (int i = 0; i < N; ++i) {                              // pasos F_i
         const LayerStep& st = S.step[size_t(i)];
         const int F = gStep[size_t(i)];
         if (F <= 0) continue;
-        if (st.hidePatch >= 0) { pos(x, y); detail::addAlpha(out, p, x, y, gPatch[size_t(st.hidePatch)], 0, F); }
-        if (st.showPatch >= 0) { pos(x, y); detail::addAlpha(out, p, x, y, gPatch[size_t(st.showPatch)], 1, F); }
-        if (st.hideRest >= 0)  { pos(x, y); detail::addAlpha(out, p, x, y, gRest[size_t(st.hideRest)], 0, F); }
-        if (st.showRest >= 0)  { pos(x, y); detail::addAlpha(out, p, x, y, gRest[size_t(st.showRest)], 1, F); }
+        if (st.hidePatch >= 0) { posA(x, y); detail::addAlpha(out, p, x, y, gPatch[size_t(st.hidePatch)], 0, F); }
+        if (st.showPatch >= 0) { posA(x, y); detail::addAlpha(out, p, x, y, gPatch[size_t(st.showPatch)], 1, F); }
+        if (st.hideRest >= 0)  { posA(x, y); detail::addAlpha(out, p, x, y, gRest[size_t(st.hideRest)], 0, F); }
+        if (st.showRest >= 0)  { posA(x, y); detail::addAlpha(out, p, x, y, gRest[size_t(st.showRest)], 1, F); }
     }
     board.newBlock();
     if (hasI) {                                                // inicio I: ocultar lo que no se ve en el frame 0
-        for (int i : S.initHidePatch) { pos(x, y); detail::addAlpha(out, p, x, y, gPatch[size_t(i)], 0, I); }
-        for (int k : S.initHideRest)  { pos(x, y); detail::addAlpha(out, p, x, y, gRest[size_t(k)], 0, I); }
+        for (int i : S.initHidePatch) { posA(x, y); detail::addAlpha(out, p, x, y, gPatch[size_t(i)], 0, I); }
+        for (int k : S.initHideRest)  { posA(x, y); detail::addAlpha(out, p, x, y, gRest[size_t(k)], 0, I); }
     }
     board.newBlock();
     double sx = p.trigX, sy = board.nextY();
-    detail::addSpawn(out, p, sx, board.rowY(), L, 0, 0);          // arranque en la fila de triggers, a la izquierda de la imagen
-    if (hasI) detail::addSpawn(out, p, sx - 30.0, board.rowY(), I, 0, 0);   // I justo a la izquierda de L: nunca encima/debajo de otro
+    detail::addSpawn(out, p, sx, board.rowY(), L, 0, 0);          // arranque: lanza L
+    if (hasI) detail::addSpawn(out, p, sx, board.rowY() + 30.0, I, 0, 0);   // y lanza I, justo ENCIMA (los dos de arranque van apilados)
 
     if (useCh) {                                               // Color triggers (id 899) al inicio: fijan el color de cada canal
         for (size_t i = 0; i < a.palette.size(); ++i) {
@@ -933,6 +929,7 @@ inline std::string buildLayeredString(const LayeredAnim& a, const GifPlan& plan,
             out += ';';
         }
     }
+    detail::triggersFirst(out, objEnd);
     if (!out.empty() && out.back() == ';') out.pop_back();
     return out;
 }

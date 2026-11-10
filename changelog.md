@@ -1,3 +1,20 @@
+# v0.5.0-beta
+- FIX (metodos 7 y 8 eran practicamente el mismo): el 7 era "BSP del 6 % + rotados" y el 8 "BSP del 15 % + rotados" (y el 8 se quedaba en BSP puro si ya llegaba a 38 dB).
+  Ahora el **7 es Geometrize puro** (un fondo plano de 1 objeto + solo rectangulos girados, estilo Primitive: sin cuadricula) y el **8 es el hibrido de verdad**
+  (30 % de los objetos en base BSP + girados solo donde queda error; solo se queda en BSP si este ya llega a 45 dB, y entonces lo avisa). Con fotos se ven claramente distintos.
+- TRIGGERS: dos filas, cada una **avanzando a la derecha uno tras otro** (paso 30 u, sin huecos): **Alpha arriba, Spawn debajo**. Los **2 Spawn de arranque**
+  vuelven a ir **uno encima del otro** (x = -30, como en la v0.4.2). Solo los Color triggers pueden ir apilados.
+- FIX (18/19 y cualquier metodo con muchos objetos): el editor de GD 2.2 tiene un **limite de 200000 objetos**; si la cadena lo pasa, GD corta los ULTIMOS objetos y como los
+  triggers iban al final se perdian (frames incompletos + animacion sin triggers). Ahora: (1) el tope total nunca pasa de `200000 - 3000 - objetos que ya tenga el nivel`,
+  (2) la cadena lleva los **triggers PRIMERO** y los objetos despues, (3) si aun asi no cabe, no se coloca nada y avisa.
+- FIX (cuelgues/cierres con decenas de miles de objetos): la colocacion se hace **por tandas** (~1500 objetos, ~25 ms por fotograma, con aviso de progreso) en vez de una sola
+  llamada gigante; y **no se seleccionan** los objetos si son mas de 8000 (seleccionar 100k-200k congelaba el editor).
+- FIX 18/19: tope DURO (objetos + triggers + Color triggers <= tope total; el reparto era una estimacion y se pasaba), y menos memoria de trabajo (pixeles de trabajo 9M/7M en vez de 16M/10M).
+- En modo canales el presupuesto por frame descuenta los Color triggers de la paleta.
+- Nuevo `tests/fullsim_test.cpp` + `tests/gdsim.hpp`: simulador de GD de punta a punta (HSV/canales, Color/Alpha/Spawn triggers, z-order con empates al azar y orden aleatorio
+  dentro de un mismo instante) que mide el PSNR de lo que vería GD contra el GIF para los 19 metodos. sanity_test actualizado (dos filas, arranque apilado, triggers primero, tope duro, 7 != 8).
+- `tools/gmd_view.py`: resumen adaptado al reparto en dos filas y comprueba el orden triggers/objetos.
+
 # v0.4.5-beta
 - FIX (metodos 7 y 8, tambien 4/18/19): GD trata el z-order **0** como "z por defecto del objeto" y lo dibuja ENCIMA de los z 1..N. La base BSP
   (z = 0) tapaba todos los rectangulos girados y en el juego solo se veia el BSP grueso (con 500 objetos: bloques planos, sin ojos ni detalle).
@@ -56,11 +73,3 @@
 - Primera version: importa GIFs animados con Alpha triggers + Spawn triggers en bucle infinito.
 - 17 metodos de imagen (los del Image Exporter, sin ASCII), objetos por frame, frames maximos, escala de grises.
 - Retardos reales del GIF, velocidad ajustable y tope total de objetos.
-
-
-## v0.4.6-beta - seguridad de presupuesto y colocacion
-
-- El limite total reserva tambien los Color Triggers (metodos 1-17 y modos 18/19).
-- Los modos por capas aplican un control final con el numero real de triggers y, si hace falta, recortan formas pequeñas antes de exportar; el PSNR se recalcula despues del recorte.
-- La interfaz ya no comunica exito cuando Geode no crea objetos; detecta importaciones parciales.
-- Documentacion corregida: el bucle normal usa `4N + 3` triggers, no `4N + 2`.

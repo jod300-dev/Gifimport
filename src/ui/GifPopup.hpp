@@ -91,6 +91,8 @@ protected:
     gdx::GifPlan makePlan() const;
     int effectivePerFrame(int frames) const;
     int maxTotal() const;
+    int editorRoom() const;                                  // objetos que aun caben en el editor (limite de GD - los que ya hay)
+    void startPlacement(std::string const& chain, size_t objectCount, std::string const& doneMsg);   // coloca por tandas (no congela ni revienta)
     CCPoint placementOrigin() const;
     int maxUsedGroup() const;
 
@@ -112,7 +114,6 @@ protected:
     bool m_gray = false;
     bool m_chan = false;                  // colores en canales (sin HSV) en los 19 metodos; por defecto HSV
     int paletteSize() const;
-    int paletteSizeForFrames(int frames) const;
 
     CCLabelBMFont* m_methodLabel = nullptr;
     CCLabelBMFont* m_descLabel = nullptr;

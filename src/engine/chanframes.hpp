@@ -84,26 +84,29 @@ inline std::string buildGifStringCh(const std::vector<Result>& results, const Gi
         if (s.empty()) continue;
         out += s; out += ';';
     }
+    const size_t objEnd = out.size();
     const Result& r0 = results[0];
     GdSize sz = gdImageSize(r0, p.eo);
     detail::TrigBoard board(detail::rowLeft(p.eo.originX - sz.w * 0.5, p.trigX), p.eo.originY + sz.h * 0.5 + 90.0);
-    auto pos = [&](double& x, double& y) { board.at(x, y); };
+    auto posA = [&](double& x, double& y) { board.atAlpha(x, y); };
+    auto posS = [&](double& x, double& y) { board.atSpawn(x, y); };
     double x, y, t = 0;
-    for (int i = 0; i < N; ++i) { pos(x, y); detail::addSpawn(out, p, x, y, F0 + i, t, L); t += plan.delay[size_t(i)]; }
-    pos(x, y); detail::addSpawn(out, p, x, y, L, plan.total, L);
-    pos(x, y); detail::addSpawn(out, p, x, y, I, 0, L);                 // autocorreccion en cada vuelta
+    for (int i = 0; i < N; ++i) { posS(x, y); detail::addSpawn(out, p, x, y, F0 + i, t, L); t += plan.delay[size_t(i)]; }
+    posS(x, y); detail::addSpawn(out, p, x, y, L, plan.total, L);
+    posS(x, y); detail::addSpawn(out, p, x, y, I, 0, L);                 // autocorreccion en cada vuelta
     board.newBlock();
     for (int i = 0; i < N; ++i) {
-        pos(x, y); detail::addAlpha(out, p, x, y, G0 + i, 1, F0 + i);
-        pos(x, y); detail::addAlpha(out, p, x, y, G0 + (i + N - 1) % N, 0, F0 + i);
+        posA(x, y); detail::addAlpha(out, p, x, y, G0 + i, 1, F0 + i);
+        posA(x, y); detail::addAlpha(out, p, x, y, G0 + (i + N - 1) % N, 0, F0 + i);
     }
     board.newBlock();
-    for (int i = 1; i < N; ++i) { pos(x, y); detail::addAlpha(out, p, x, y, G0 + i, 0, I); }
+    for (int i = 1; i < N; ++i) { posA(x, y); detail::addAlpha(out, p, x, y, G0 + i, 0, I); }
     board.newBlock();
     double sx = p.trigX, sy = board.nextY();
-    detail::addSpawn(out, p, sx, board.rowY(), L, 0, 0);          // arranque en la fila de triggers, a la izquierda de la imagen
-    detail::addSpawn(out, p, sx - 30.0, board.rowY(), I, 0, 0);   // I justo a la izquierda de L: nunca encima/debajo de otro
+    detail::addSpawn(out, p, sx, board.rowY(), L, 0, 0);          // arranque: lanza L
+    detail::addSpawn(out, p, sx, board.rowY() + 30.0, I, 0, 0);   // y lanza I, justo ENCIMA (los dos de arranque van apilados)
     appendColorTriggers(out, palette, kFirstColorChannel, p.trigX, sy);
+    detail::triggersFirst(out, objEnd);
     if (!out.empty() && out.back() == ';') out.pop_back();
     return out;
 }

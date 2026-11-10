@@ -125,10 +125,8 @@ inline void compactZ(std::vector<Shape>& shapes, int W, int H) {
 inline void sanitizeResult(Result& r) {
     if (r.rasterW <= 0 || r.rasterH <= 0 || r.shapes.empty()) return;
     confineShapes(r.shapes, r.rasterW, r.rasterH);
-    // No basta con compactar solo cuando mz>64: algunos metodos generan z
-    // pequeños pero aun pueden dejar empates entre rectangulos que se pisan.
-    // Para todo resultado a color, la regla es estricta: solape => z distinto.
-    if (!r.mono) compactZ(r.shapes, r.rasterW, r.rasterH);
+    int mz = 0; for (auto& s : r.shapes) mz = std::max<int>(mz, s.z);
+    if (!r.mono && mz > 64) compactZ(r.shapes, r.rasterW, r.rasterH);
 }
 
 } // namespace gdx

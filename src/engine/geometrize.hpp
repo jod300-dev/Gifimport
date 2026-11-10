@@ -254,7 +254,7 @@ inline int effectiveQuality(const Options& o) {
 // Fracción del presupuesto que va a la base BSP del híbrido. Medido en fotos y pinturas a 1.000, 3.000 y 10.000
 // objetos: entre el 10 % y el 35 % casi no cambia el resultado (diferencias de ~0,1 dB); con más base empeora.
 inline double hybridFractionFor(const Options& o) {
-    return o.hybridFraction > 0 ? double(o.hybridFraction) : 0.15;
+    return o.hybridFraction > 0 ? double(o.hybridFraction) : 0.30;
 }
 
 // hybridBase = 0 -> Geometrize (con una base BSP gruesa del 6 %); > 0 -> fracción del presupuesto para la base BSP
@@ -272,23 +272,33 @@ inline std::vector<Shape> geometrizeShapes(const Image& src, const Options& o, d
     const int budget = std::max(1, o.budget);
     const int quality = effectiveQuality(o);
 
-    // Híbrido: si el BSP con todo el presupuesto ya es casi perfecto (ilustraciones planas, logos), no hace falta más.
+    // Hibrido: si el BSP con todo el presupuesto ya es casi perfecto (logos, colores planos), no hace falta mas.
+    // Umbral alto (45 dB): por debajo se hace el hibrido de verdad, para que 7 y 8 no acaben siendo el mismo resultado.
     if (hybrid) {
         std::vector<Shape> full = treeShapes(ras, budget, o.alphaThreshold, true, nullptr);
         Image r = renderShapes(full, W, H);
-        if (computePsnr(target, r, 1) >= 38.0 && !isCancelled(prog)) { for (auto& s : full) s.z = 0; report(prog, 1.f); return full; }
+        if (computePsnr(target, r, 1) >= 45.0 && !isCancelled(prog)) { for (auto& s : full) s.z = 0; report(prog, 1.f); return full; }
     }
 
     std::vector<Shape> shapes;
     Geo geo(target, o.seed);
-    const double frac = hybrid ? hybridBase : 0.06;                    // Geometrize también parte de una base gruesa
     int z0 = 1;
     {
-        int b1 = std::max(1, int(budget * frac));
-        shapes = treeShapes(ras, b1, o.alphaThreshold, true, nullptr);
-        for (auto& s : shapes) s.z = 0;
-        Image base = renderShapes(shapes, W, H);
-        geo.setCanvasImage(base, mr, mg, mb);
+        if (hybrid) {
+            // 8. HIBRIDO: base BSP (una parte GRANDE del presupuesto, se ve la estructura de bloques) + rotados sobre el residuo.
+            int b1 = std::max(1, int(budget * hybridBase));
+            shapes = treeShapes(ras, b1, o.alphaThreshold, true, nullptr);
+            for (auto& s : shapes) s.z = 0;
+            Image base = renderShapes(shapes, W, H);
+            geo.setCanvasImage(base, mr, mg, mb);
+        } else {
+            // 7. GEOMETRIZE PURO (estilo Primitive): NINGUNA base BSP. Un unico rectangulo de fondo con el color medio y despues
+            //    solo rectangulos girados colocados por busqueda aleatoria. Aspecto pictorico, sin cuadricula.
+            Shape bg; bg.cx = W * 0.5f; bg.cy = H * 0.5f; bg.w = float(W); bg.h = float(H); bg.rot = 0;
+            bg.r = mr; bg.g = mg; bg.b = mb; bg.z = 0;
+            shapes.push_back(bg);
+            geo.setCanvasFlat(mr, mg, mb);
+        }
         report(prog, 0.05f);
         auto extra = geo.run(budget - int(shapes.size()), z0, quality, prog, 0.05f, 0.55f);
         shapes.insert(shapes.end(), extra.begin(), extra.end());

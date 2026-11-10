@@ -5,6 +5,7 @@
 #include <Geode/utils/file.hpp>
 #include <Geode/utils/async.hpp>
 #include <thread>
+#include <chrono>
 
 namespace {
     constexpr float kPopupW = 430.f, kPopupH = 290.f;
@@ -37,6 +38,92 @@ namespace {
         int step = u < 600 ? 10 : u < 2000 ? 50 : 100;
         return std::clamp(int(std::lround(u / step)) * step, kMinSize, kMaxSize);
     }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Colocacion POR TANDAS. Crear 100k-200k objetos de golpe con createObjectsFromString congela el juego (o lo cierra en moviles) y,
+// si se pasa el limite de objetos del editor, GD corta la cadena y se pierden los ultimos objetos. Aqui la cadena se parte en trozos
+// de ~1500 objetos (cortando siempre en ';') y se crean unos pocos por fotograma (~25 ms), con aviso de progreso.
+// El nodo cuelga del editor: si se sale del editor, la colocacion se cancela sola.
+// ---------------------------------------------------------------------------------------------------------------------
+namespace {
+    std::vector<std::string> splitChain(std::string const& s, size_t perPart) {
+        std::vector<std::string> parts;
+        size_t start = 0, count = 0;
+        for (size_t i = 0; i <= s.size(); ++i) {
+            if (i == s.size() || s[i] == ';') {
+                if (i > start) ++count;
+                if (count >= perPart || i == s.size()) {
+                    if (i > start || !parts.empty()) {
+                        size_t endPos = i;
+                        while (endPos > start && s[endPos - 1] == ';') --endPos;
+                        if (endPos > start) parts.push_back(s.substr(start, endPos - start));
+                    }
+                    start = i + 1; count = 0;
+                }
+            }
+        }
+        return parts;
+    }
+
+    class PlaceRunner : public CCNode {
+    public:
+        std::vector<std::string> parts;
+        size_t next = 0, placed = 0, totalObjs = 0;
+        bool selectAfter = false;
+        std::string doneMsg;
+        Ref<Notification> note;
+        CCArray* selected = nullptr;
+
+        static PlaceRunner* create() {
+            auto r = new PlaceRunner();
+            if (r && r->init()) { r->autorelease(); return r; }
+            delete r; return nullptr;
+        }
+        ~PlaceRunner() { if (selected) selected->release(); }
+
+        void begin(std::vector<std::string> p, size_t total, bool select, std::string const& msg) {
+            parts = std::move(p); totalObjs = total; doneMsg = msg;
+            selectAfter = select && total <= 8000;                    // seleccionar decenas de miles de objetos tambien cuelga el editor
+            if (selectAfter) { selected = CCArray::create(); selected->retain(); }
+            note = Notification::create("Colocando objetos... 0%", NotificationIcon::Loading, 0.f);
+            note->show();
+            this->schedule(schedule_selector(PlaceRunner::step));
+        }
+
+        void step(float) {
+            auto lel = LevelEditorLayer::get();
+            if (!lel) { this->finish(false); return; }
+            auto t0 = std::chrono::steady_clock::now();
+            do {
+                if (next >= parts.size()) break;
+                CCArray* made = lel->createObjectsFromString(parts[next].c_str(), true, true);
+                if (made) {
+                    placed += made->count();
+                    if (selected) for (auto* o : CCArrayExt<GameObject*>(made)) selected->addObject(o);
+                }
+                std::string().swap(parts[next]);
+                ++next;
+            } while (std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count() < 25.0);
+            if (next >= parts.size()) { this->finish(true); return; }
+            char buf[96];
+            std::snprintf(buf, sizeof buf, "Colocando objetos... %d%%", int(100.0 * double(next) / double(std::max<size_t>(1, parts.size()))));
+            if (note) note->setString(buf);
+        }
+
+        void finish(bool ok) {
+            this->unschedule(schedule_selector(PlaceRunner::step));
+            if (ok && selected && selected->count() > 0) {
+                if (auto* ed = EditorUI::get()) ed->selectObjects(selected, true);
+            }
+            if (note) {
+                note->setString(ok ? doneMsg : std::string("Colocacion cancelada (se salio del editor)"));
+                note->setIcon(ok ? NotificationIcon::Success : NotificationIcon::Error);
+                note->waitAndHide();
+            }
+            this->removeFromParent();
+        }
+    };
 }
 
 GifPopup* GifPopup::create(EditorUI* editor) {
@@ -237,10 +324,6 @@ int GifPopup::paletteSize() const {
     return std::clamp(int(Mod::get()->getSettingValue<int>("layered-palette-size")), 8, 900);
 }
 
-int GifPopup::paletteSizeForFrames(int frames) const {
-    return m_chan ? gdx::gifPaletteBudget(paletteSize(), frames, maxTotal()) : 0;
-}
-
 void GifPopup::onSettings(CCObject*) {
     openSettingsPopup(Mod::get());
 }
@@ -322,8 +405,25 @@ gdx::GdExportOptions GifPopup::makeExportOptions() const {
     return eo;
 }
 
+int GifPopup::editorRoom() const {
+    auto lel = LevelEditorLayer::get();
+    int cur = (lel && lel->m_objects) ? int(lel->m_objects->count()) : 0;
+    return std::max(0, gdx::kEditorObjectLimit - gdx::kEditorObjectMargin - cur);
+}
+
+// Tope total de objetos: el de los ajustes, pero nunca mas de lo que cabe en el editor (limite de GD 2.2 menos lo que ya hay).
 int GifPopup::maxTotal() const {
-    return std::clamp(Mod::get()->getSettingValue<int>("max-total-objects"), 2000, 150000);
+    int s = std::clamp(Mod::get()->getSettingValue<int>("max-total-objects"), 2000, 150000);
+    return std::clamp(std::min(s, editorRoom()), 200, 150000);
+}
+
+void GifPopup::startPlacement(std::string const& chain, size_t objectCount, std::string const& doneMsg) {
+    auto lel = LevelEditorLayer::get();
+    if (!lel) return;
+    auto runner = PlaceRunner::create();
+    if (!runner) return;
+    lel->addChild(runner);
+    runner->begin(splitChain(chain, 1500), objectCount, Mod::get()->getSettingValue<bool>("select-after"), doneMsg);
 }
 
 // Metodo 18: 'Objetos por frame' x frames es el total que se reparte entre las capas.
@@ -336,7 +436,7 @@ gdx::LayeredOptions GifPopup::makeLayeredOptions() const {
     lo.tol = std::clamp(int(mod->getSettingValue<int>("layered-tolerance")), 8, 80);
     lo.denoise = mod->getSettingValue<bool>("layered-denoise");
     lo.painter = mod->getSettingValue<bool>("layered-rotated") ? 1 : 0;
-    lo.channels = paletteSizeForFrames(makePlan().count());       // reserva paleta dentro del tope total; sin check: HSV
+    lo.channels = m_chan ? paletteSize() : 0;                       // sin el check: HSV
     lo.firstChannel = gdx::kFirstColorChannel;                      // siempre desde el 2: el canal 1 nunca se usa
     lo.reuse = float(std::clamp(mod->getSettingValue<double>("layered-reuse"), 0.0, 10.0) / 100.0);
     return lo;
@@ -358,7 +458,7 @@ std::string GifPopup::layeredKey() const {
     key += "|" + mod->getSettingValue<std::string>("quality");
     key += treeMode() ? "|T" : "|L";
     key += m_chan ? "|c" : "|h";
-    key += std::to_string(paletteSizeForFrames(m_gif ? makePlan().count() : 2));
+    key += std::to_string(paletteSize());
     return key;
 }
 
@@ -371,7 +471,7 @@ gdx::GifPlan GifPopup::makePlan() const {
 
 // Objetos por frame realmente usados: el pedido, recortado para no pasar del tope total.
 int GifPopup::effectivePerFrame(int frames) const {
-    return gdx::gifPerFrameBudget(m_perFrame, frames, maxTotal(), paletteSizeForFrames(frames));
+    return gdx::gifPerFrameBudget(m_perFrame, frames, maxTotal(), m_chan ? paletteSize() : 0);   // + 1 Color trigger por canal
 }
 
 void GifPopup::scheduleRecompute() {
@@ -480,12 +580,7 @@ void GifPopup::applyPreview(std::shared_ptr<PreviewJob> job) {
             std::snprintf(b2, sizeof b2, "arbol prof. %d | %.1f dB | %.1f s", A.depthMax, A.psnrAvg, m_layeredPlan.total);
         else
             std::snprintf(b2, sizeof b2, "%d rests | %.1f dB | %.1f s", int(A.rests.size()), A.psnrAvg, m_layeredPlan.total);
-        std::string note = A.note;
-        if (!m_result.note.empty()) {
-            if (!note.empty()) note += " ";
-            note += m_result.note;
-        }
-        this->setStatus(a2, b2, note);
+        this->setStatus(a2, b2, m_result.note);
         return;
     }
 
@@ -495,17 +590,12 @@ void GifPopup::applyPreview(std::shared_ptr<PreviewJob> job) {
     int pf = effectivePerFrame(n);
     size_t kb0 = gdx::toGdString(m_result, makeExportOptions()).size() / 1024;
     size_t objs0 = m_result.shapes.size();
-    size_t totalObjs = objs0 * size_t(n) + size_t(gdx::gifTriggerCount(n)) + size_t(paletteSizeForFrames(n));
+    size_t totalObjs = objs0 * size_t(n) + size_t(gdx::gifTriggerCount(n)) + (m_chan ? size_t(paletteSize()) : size_t(0));
     char a1[96], b1[96];
     std::snprintf(a1, sizeof a1, "%d frames | ~%zu objetos", n, totalObjs);
     std::snprintf(b1, sizeof b1, "~%zu KB | %.1f s de bucle", kb0 * size_t(n) + size_t(n) * 2, plan.total);
     std::string note = m_result.note;
     if (pf < m_perFrame) note = "Limitado a " + std::to_string(pf) + " obj/frame por el tope total. " + note;
-    const int paletteLimit = paletteSizeForFrames(n);
-    if (m_chan && paletteLimit < paletteSize()) {
-        if (!note.empty()) note += " ";
-        note += "Paleta limitada a " + std::to_string(paletteLimit) + " canales por el tope total.";
-    }
     this->setStatus(a1, b1, note);
 }
 
@@ -601,6 +691,10 @@ void GifPopup::onPlace(CCObject*) {
         return;
     }
     if (!LevelEditorLayer::get()) return;
+    if (this->editorRoom() < 300) {
+        FLAlertLayer::create("GIF Importer", "El nivel ya esta casi en el limite de objetos del editor (200000). No hay sitio para el GIF.", "OK")->show();
+        return;
+    }
 
     auto job = std::make_shared<BuildJob>();
     job->gif = m_gif;
@@ -641,7 +735,7 @@ void GifPopup::onPlace(CCObject*) {
     this->setStatus("Convirtiendo frames... 0%", "No cierres la ventana");
 
     job->useCh = m_chan;
-    job->paletteK = paletteSizeForFrames(job->plan.count());
+    job->paletteK = paletteSize();
     std::thread([job]() {
         try {
             job->results = gdx::convertFrames(*job->gif, job->plan, job->method, job->opt, &job->prog, job->threads);
@@ -679,13 +773,7 @@ void GifPopup::finishBuild(std::shared_ptr<BuildJob> job) {
         const bool sheet = pm.rfind("Hoja", 0) == 0, solo = pm.rfind("Solo", 0) == 0, calib = pm.rfind("Patron", 0) == 0;
         if (calib) {                                            // patron de calibracion: no usa el GIF
             auto cr = gdx::buildCalibration(p.eo, p.trigX);
-            CCArray* made = lel->createObjectsFromString(cr.str.c_str(), true, true);
-            if (!made || made->count() == 0) {
-                FLAlertLayer::create("GIF Importer", "Geometry Dash no pudo crear el patron de calibracion. No se marco como colocado.", "OK")->show();
-                return;
-            }
-            if (mod->getSettingValue<bool>("select-after") && m_editor) m_editor->selectObjects(made, true);
-            Notification::create("Patron de calibracion colocado", NotificationIcon::Success, 3.5f)->show();
+            this->startPlacement(cr.str, 130, "Patron de calibracion colocado");
             this->onClose(nullptr);
             return;
         }
@@ -707,15 +795,15 @@ void GifPopup::finishBuild(std::shared_ptr<BuildJob> job) {
                 this->applyPreview(nullptr);
                 return;
             }
-            CCArray* made = lel->createObjectsFromString(s2.c_str(), true, true);
-            if (!made || made->count() == 0) {
-                FLAlertLayer::create("GIF Importer", "Geometry Dash no pudo crear ningun objeto de la hoja. No se marco como colocada.", "OK")->show();
+            size_t nObjs = 0; for (auto& r : frames) nObjs += r.shapes.size();
+            if (int(nObjs) > this->editorRoom()) {
+                FLAlertLayer::create("GIF Importer", "No caben tantos objetos en el editor (limite 200000). Baja los objetos por frame o los frames.", "OK")->show();
+                this->applyPreview(nullptr);
                 return;
             }
-            if (mod->getSettingValue<bool>("select-after") && m_editor) m_editor->selectObjects(made, true);
             char m2[128];
             std::snprintf(m2, sizeof m2, solo ? "Frame 0 colocado (sin triggers)" : "Hoja de %d frames colocada (sin triggers)", int(frames.size()));
-            Notification::create(m2, NotificationIcon::Success, 3.5f)->show();
+            this->startPlacement(s2, nObjs, m2);
             this->onClose(nullptr);
             return;
         }
@@ -741,24 +829,16 @@ void GifPopup::finishBuild(std::shared_ptr<BuildJob> job) {
         count = job->layered->objectCount() + size_t(gdx::animTriggerCount(*job->layered));
         groupCount = gdx::animGroupCount(*job->layered);
     }
-    CCArray* created = lel->createObjectsFromString(str.c_str(), true, true);
-    if (!created || created->count() == 0) {
-        FLAlertLayer::create("GIF Importer", "Geometry Dash rechazo la cadena de objetos. No se notifico un falso exito; revisa el nivel y vuelve a intentar.", "OK")->show();
+    if (long(count) > long(this->editorRoom())) {          // GD cortaria la cadena y se perderian objetos: mejor no colocar nada
+        char em[200];
+        std::snprintf(em, sizeof em, "El GIF necesita %zu objetos y en el editor solo caben %d mas (limite 200000). Baja los objetos por frame o los frames.", count, this->editorRoom());
+        FLAlertLayer::create("GIF Importer", em, "OK")->show();
+        this->applyPreview(nullptr);
         return;
     }
-    if (size_t(created->count()) != count) {
-        char warning[192];
-        std::snprintf(warning, sizeof warning, "Geode creo %u de %zu objetos esperados. La importacion quedo parcial; revisa el nivel antes de repetirla.", unsigned(created->count()), count);
-        FLAlertLayer::create("GIF Importer - importacion parcial", warning, "OK")->show();
-        if (mod->getSettingValue<bool>("select-after") && m_editor) m_editor->selectObjects(created, true);
-        return;
-    }
-    if (mod->getSettingValue<bool>("select-after") && m_editor) m_editor->selectObjects(created, true);
-
-    char msg[128];
-    std::snprintf(msg, sizeof msg, "GIF colocado: %d frames, %zu objetos, grupos %d-%d",
-                  N, count, p.baseGroup, p.baseGroup + groupCount - 1);
-    Notification::create(msg, NotificationIcon::Success, 3.5f)->show();
+    char msg[160];
+    std::snprintf(msg, sizeof msg, "GIF colocado: %d frames, %zu objetos, grupos %d-%d", N, count, p.baseGroup, p.baseGroup + groupCount - 1);
+    this->startPlacement(str, count, msg);
     this->onClose(nullptr);
 }
 

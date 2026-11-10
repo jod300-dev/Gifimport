@@ -8,7 +8,7 @@
 //    L                  grupo del bucle: Spawn(F_i, retardo t_i) para cada i + Spawn(L, retardo = duracion total)
 //    I                  grupo de inicio: Alpha(G_i, 0) para i >= 1
 //    2 Spawn "de posicion" en x = trigX: uno lanza L (arranca la animacion) y otro lanza I
-//  Total de triggers = 4N + 3 (incluye el Spawn(I) de autocorreccion).   Grupos necesarios = 2N + 2.
+//  Total de triggers = 4N + 2.   Grupos necesarios = 2N + 2.
 // ============================================================================
 #pragma once
 #include <atomic>
@@ -92,41 +92,49 @@ inline GifPlan planFrames(const GifData& g, int maxFrames, double speed, double 
 }
 
 namespace detail {
-// Colocacion de los triggers de frames: UNA SOLA FILA, uno tras otro hacia la derecha (x = left + k * 30), sin huecos y sin que
-// ninguno quede encima o debajo de otro. Un trigger que controla un frame va siempre a la derecha del anterior, asi el orden de
-// activacion (GD ejecuta los triggers de un mismo instante de izquierda a derecha) es el orden de los frames.
-// Solo los Color triggers (id 899) no siguen esta regla: pueden ir apilados porque no dependen del orden.
+// Colocacion de los triggers de frames en DOS filas, cada una avanzando hacia la derecha UNO TRAS OTRO (paso 30 u, sin huecos):
+//   fila de arriba : todos los ALPHA (mostrar/ocultar frames), en orden de frames
+//   fila de abajo  : todos los SPAWN (bucle L, autocorreccion), en orden de frames
+// Dentro de una fila ningun trigger queda encima o debajo de otro (cada uno tiene su propia x), asi no se pisan ni se interponen.
+// Los 2 Spawn de arranque (posicion) van uno encima del otro a la izquierda, como en la v0.4.2. Los Color triggers pueden apilarse.
 struct TrigBoard {
-    double left, top, dx; int k = 0;
-    TrigBoard(double l, double t, double ddx = 30.0) : left(l), top(t), dx(ddx) {}
-    void at(double& x, double& y) { x = left + k * dx; y = top; ++k; }
-    void newBlock() {}                                               // sin huecos: la fila es continua
-    double rowY() const { return top; }
-    double nextY() const { return top + 60.0; }                      // base para los Color triggers (debajo de la fila)
+    double left, alphaY, spawnY, dx; int ka = 0, ks = 0;
+    TrigBoard(double l, double top, double ddx = 30.0) : left(l), alphaY(top + 60.0), spawnY(top), dx(ddx) {}
+    void atAlpha(double& x, double& y) { x = left + ka * dx; y = alphaY; ++ka; }
+    void atSpawn(double& x, double& y) { x = left + ks * dx; y = spawnY; ++ks; }
+    void newBlock() {}                                               // sin huecos: las filas son continuas
+    double rowY() const { return spawnY; }                           // y del primer Spawn de arranque (el segundo va 30 u mas arriba)
+    double nextY() const { return alphaY + 60.0; }                   // base para los Color triggers (encima de las dos filas)
 };
-// x inicial de la fila: a la derecha de los triggers de arranque (trigX - 30 y trigX) y no antes del borde izquierdo de la imagen
+// x inicial de las filas: a la derecha de los triggers de arranque (trigX) y no antes del borde izquierdo de la imagen
 inline double rowLeft(double imageLeft, double trigX) { return std::max(imageLeft, trigX + 60.0); }
+} // namespace detail
+
+// Limite de objetos del editor de GD 2.2 (si se pasa, createObjectsFromString corta la cadena: se pierden los ULTIMOS objetos).
+// Las cadenas se generan con los TRIGGERS PRIMERO (ver triggersFirst) para que un recorte nunca deje la animacion sin triggers.
+constexpr int kEditorObjectLimit = 200000;
+constexpr int kEditorObjectMargin = 3000;      // colchon para lo que el nivel ya tenga o lo que GD anada
+
+namespace detail {
+// Mueve la parte de triggers (out[objEnd..]) delante de los objetos (out[0..objEnd)). Ambas partes terminan en ';'.
+inline void triggersFirst(std::string& out, size_t objEnd) {
+    if (objEnd == 0 || objEnd >= out.size()) return;
+    if (out[objEnd - 1] != ';') return;
+    std::string t = out.substr(objEnd);
+    if (t.empty() || t.back() != ';') t += ';';
+    out.erase(objEnd);
+    out.insert(0, t);
+}
 } // namespace detail
 
 constexpr int kGifTriggersPerFrame = 4;
 inline int gifTriggerCount(int frames) { return kGifTriggersPerFrame * frames + 3; }   // +1: Spawn(I) en cada vuelta
 inline int gifGroupCount(int frames) { return 2 * frames + 2; }
 
-// Reserva tambien los Color Triggers del modo canales. El calculo usa el maximo
-// de la paleta solicitada; la paleta real nunca puede ser mayor.
-inline int gifPaletteBudget(int requested, int frames, int maxTotal) {
-    const long long n = std::max(1, frames);
-    const long long room = std::max(0LL, static_cast<long long>(maxTotal)
-        - gifTriggerCount(int(n)) - n); // deja al menos un objeto por frame
-    return int(std::clamp<long long>(std::min<long long>(std::max(0, requested), room), 0, 900));
-}
-
-// Objetos por frame que caben respetando el tope total (formas + triggers + paleta).
+// Objetos por frame que caben respetando el tope total (triggers incluidos).
 inline int gifPerFrameBudget(int requested, int frames, int maxTotal, int extraObjects = 0) {
-    const long long n = std::max(1, frames);
-    const long long room = (static_cast<long long>(maxTotal) - gifTriggerCount(int(n))
-        - std::max(0, extraObjects)) / n;
-    return int(std::clamp<long long>(std::min<long long>(std::max(1, requested), room), 1, 80000));
+    int room = (maxTotal - gifTriggerCount(frames) - std::max(0, extraObjects)) / std::max(1, frames);
+    return std::clamp(std::min(requested, room), 1, 80000);
 }
 
 // ------------------------------------------------------------ convertir -----
@@ -227,43 +235,46 @@ inline std::string buildGifString(const std::vector<Result>& results, const GifP
         out += s; out += ';';
     }
 
-    // --- triggers: cuadricula encima de la imagen (la posicion no importa para los spawn-triggered)
+    // --- triggers (se mueven al principio de la cadena al final: ver triggersFirst)
+    const size_t objEnd = out.size();
     const Result& r0 = results[0];
     GdSize sz = gdImageSize(r0, p.eo);
     detail::TrigBoard board(detail::rowLeft(p.eo.originX - sz.w * 0.5, p.trigX), p.eo.originY + sz.h * 0.5 + 90.0);
-    auto pos = [&](double& x, double& y) { board.at(x, y); };
+    auto posA = [&](double& x, double& y) { board.atAlpha(x, y); };
+    auto posS = [&](double& x, double& y) { board.atSpawn(x, y); };
     double x, y;
 
     // bucle L: Spawn(F_i, t_i) + Spawn(L, total)
     double t = 0;
     for (int i = 0; i < N; ++i) {
-        pos(x, y);
+        posS(x, y);
         detail::addSpawn(out, p, x, y, F0 + i, t, L);
         t += plan.delay[size_t(i)];
     }
-    pos(x, y);
+    posS(x, y);
     detail::addSpawn(out, p, x, y, L, plan.total, L);
     // Autocorreccion: en cada vuelta se vuelve a ocultar todo salvo el frame 0, asi un trigger fallido no deja frames superpuestos.
-    pos(x, y);
+    posS(x, y);
     detail::addSpawn(out, p, x, y, I, 0, L);
     board.newBlock();
 
     // F_i: mostrar G_i, ocultar el frame anterior
     for (int i = 0; i < N; ++i) {
-        pos(x, y); detail::addAlpha(out, p, x, y, G0 + i, 1, F0 + i);
-        pos(x, y); detail::addAlpha(out, p, x, y, G0 + (i + N - 1) % N, 0, F0 + i);
+        posA(x, y); detail::addAlpha(out, p, x, y, G0 + i, 1, F0 + i);
+        posA(x, y); detail::addAlpha(out, p, x, y, G0 + (i + N - 1) % N, 0, F0 + i);
     }
     board.newBlock();
     // I: ocultar los frames 1..N-1 al empezar
     for (int i = 1; i < N; ++i) {
-        pos(x, y); detail::addAlpha(out, p, x, y, G0 + i, 0, I);
+        posA(x, y); detail::addAlpha(out, p, x, y, G0 + i, 0, I);
     }
     board.newBlock();
     // arranque (triggers de posicion): lanzan L e I
     double sx = p.trigX, sy = board.nextY();
-    detail::addSpawn(out, p, sx, board.rowY(), L, 0, 0);          // arranque en la fila de triggers, a la izquierda de la imagen
-    detail::addSpawn(out, p, sx - 30.0, board.rowY(), I, 0, 0);   // I justo a la izquierda de L: nunca encima/debajo de otro
+    detail::addSpawn(out, p, sx, board.rowY(), L, 0, 0);          // arranque: lanza L
+    detail::addSpawn(out, p, sx, board.rowY() + 30.0, I, 0, 0);   // y lanza I, justo ENCIMA (los dos de arranque van apilados)
 
+    detail::triggersFirst(out, objEnd);
     if (!out.empty() && out.back() == ';') out.pop_back();
     return out;
 }

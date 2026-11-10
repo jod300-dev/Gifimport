@@ -26,31 +26,35 @@ static std::vector<std::map<int, std::string>> parse(const std::string& s) {
     while (std::getline(ss, item, ';')) { std::map<int, std::string> kv; std::stringstream is(item); std::string a, b; while (std::getline(is, a, ',') && std::getline(is, b, ',')) kv[std::stoi(a)] = b; v.push_back(kv); }
     return v;
 }
-// Triggers de frames: UNA fila, uno tras otro hacia la derecha. Cuenta (a) pares que comparten x (uno encima/debajo de otro),
-// (b) pasos hacia atras o con distinta y en el orden de creacion. Los Color triggers (id 899) estan exentos.
+// Triggers de frames: DOS filas (Alpha arriba, Spawn debajo), cada una avanzando hacia la derecha uno tras otro (x estrictamente
+// creciente en orden de creacion, misma y), y los 2 Spawn de arranque (de posicion) apilados en la misma x. Los Color triggers (899) estan exentos.
 static int triggerOverlaps(const std::string& s) {
-    std::vector<std::pair<double, double>> pts;
+    int bad = 0; double lastA = -1e18, lastS = -1e18, yA = 0, yS = 0; bool fa = true, fs = true;
+    std::vector<std::pair<double, double>> start;
     for (auto& kv : parse(s)) {
         if (!kv.count(1)) continue;
         int id = std::stoi(kv.at(1));
         if (id != 1007 && id != 1268) continue;
-        pts.push_back({std::stod(kv.at(2)), std::stod(kv.at(3))});
+        double x = std::stod(kv.at(2)), y = std::stod(kv.at(3));
+        if (!kv.count(62)) { start.push_back({x, y}); continue; }
+        if (id == 1007) { if (fa) { yA = y; fa = false; } if (x <= lastA || std::abs(y - yA) > 0.01) ++bad; lastA = x; }
+        else            { if (fs) { yS = y; fs = false; } if (x <= lastS || std::abs(y - yS) > 0.01) ++bad; lastS = x; }
     }
-    int bad = 0;
-    for (size_t i = 0; i < pts.size(); ++i) for (size_t j = i + 1; j < pts.size(); ++j)
-        if (std::abs(pts[i].first - pts[j].first) < 29.0) ++bad;          // misma columna (o solape horizontal)
-    // orden de creacion: los de spawn-triggered van estrictamente de izquierda a derecha en la misma fila
-    double lastX = -1e18, rowY = 0; bool first = true;
+    if (!fa && !fs && !(yA > yS)) ++bad;                          // Alpha ARRIBA, Spawn DEBAJO
+    for (size_t i = 0; i < start.size(); ++i) for (size_t j = i + 1; j < start.size(); ++j)
+        if (std::abs(start[i].first - start[j].first) > 0.01 || std::abs(start[i].second - start[j].second) < 29.0) ++bad;   // apilados
+    return bad;
+}
+// los triggers van ANTES que los objetos (un recorte por el limite del editor nunca debe dejar la animacion sin triggers)
+static bool triggersBeforeObjects(const std::string& s) {
+    bool seenObj = false;
     for (auto& kv : parse(s)) {
         if (!kv.count(1)) continue;
         int id = std::stoi(kv.at(1));
-        if ((id != 1007 && id != 1268) || !kv.count(62)) continue;
-        double x = std::stod(kv.at(2)), y = std::stod(kv.at(3));
-        if (first) { rowY = y; first = false; }
-        if (x <= lastX || std::abs(y - rowY) > 0.01) ++bad;
-        lastX = x;
+        if (id == 3092) seenObj = true;
+        else if (seenObj && (id == 1007 || id == 1268 || id == 899)) return false;
     }
-    return bad;
+    return true;
 }
 
 // pares que se solapan (> 0.1 px) y comparten z: en GD su orden relativo seria arbitrario
@@ -92,6 +96,7 @@ int main(int argc, char** argv) {
             std::string str = buildGifString(res, plan, p, nullptr);
             if (str.empty()) { fail("metodo " + std::to_string(m + 1) + ": cadena vacia"); continue; }
             if (int ov = triggerOverlaps(str)) fail("metodo " + std::to_string(m + 1) + ": " + std::to_string(ov) + " pares de triggers se pisan");
+            if (!triggersBeforeObjects(str)) fail("metodo " + std::to_string(m + 1) + ": hay triggers DESPUES de los objetos");
             GdSize sz = gdImageSize(res[0], p.eo);
             double zf0 = -1e9, zOthers = -1e9;
             for (auto& kv : parse(str)) {
@@ -130,6 +135,7 @@ int main(int argc, char** argv) {
         std::string err, str = buildAnimString(A, plan, p, &err);
         if (str.empty()) { fail(tag + ": cadena vacia " + err); continue; }
         if (int ov = triggerOverlaps(str)) fail(tag + ": " + std::to_string(ov) + " pares de triggers se pisan");
+        if (!triggersBeforeObjects(str)) fail(tag + ": hay triggers DESPUES de los objetos");
         GdSize sz = gdImageSize(A.still, p.eo);
         for (auto& kv : parse(str)) {
             if (std::stoi(kv.at(1)) != p.eo.objectId) continue;
@@ -140,6 +146,23 @@ int main(int argc, char** argv) {
             double tol = 0.3 * (sz.w / A.W) + p.eo.bleed;
             if (x - ex < p.eo.originX - sz.w * 0.5 - tol || x + ex > p.eo.originX + sz.w * 0.5 + tol || y - ey < p.eo.originY - sz.h * 0.5 - tol || y + ey > p.eo.originY + sz.h * 0.5 + tol) { fail(tag + ": objeto exportado fuera de la imagen"); break; }
         }
+        ++checks;
+    }
+    // tope duro de objetos en 18/19 (objetos + triggers <= maxTotal)
+    for (int tree = 0; tree < 2; ++tree) {
+        Options o; o.maxRaster = 256; o.quality = 0; o.lightSpecialChannels = true; o.maxChannels = 0;
+        LayeredOptions lo; lo.perFrame = 5000; lo.maxTotal = 4000; lo.tree = tree; lo.channels = 0;
+        LayeredAnim A = buildAnim(g, plan, o, lo, nullptr, 2);
+        long tot = A.ok() ? long(A.objectCount()) + animTriggerCount(A) : 0;
+        if (!A.ok() || tot > lo.maxTotal) fail(std::string(tree ? "arbol" : "capas") + ": supera el tope duro (" + std::to_string(tot) + " > 4000)");
+        ++checks;
+    }
+    // 7 y 8 NO son el mismo metodo: el 7 es puro (un fondo plano + girados), el 8 tiene base BSP (mas formas alineadas a ejes)
+    {
+        Options o; o.budget = 400; o.maxRaster = 256; o.quality = 0;
+        Result a = convert(g.frames[0], Method::Geometrize, o), b = convert(g.frames[0], Method::Hybrid, o);
+        auto axisCount = [](const Result& r) { int n = 0; for (auto& s : r.shapes) if (std::fmod(std::abs(s.rot), 90.f) < 0.05f) ++n; return n; };
+        if (axisCount(a) >= axisCount(b) && !b.note.empty() == false) fail("7 y 8: el 7 tiene tantas formas alineadas como el 8 (no hay diferencia)");
         ++checks;
     }
     // hoja de frames (diagnostico): sin grupos ni triggers; cada frame dentro de su casilla

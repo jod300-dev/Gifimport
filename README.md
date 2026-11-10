@@ -10,7 +10,7 @@ Basado en el motor del *Image Exporter*. Convierte un GIF animado en objetos de 
 | `L`   | Spawn(`F_i`, retardo `t_i`) para cada frame + Spawn(`L`, retardo = duracion total) → **bucle infinito** |
 | `I`   | Alpha(`G_i`, 0) para i ≥ 1 (ocultar al empezar) |
 
-Mas 2 Spawn de posicion en x = -30 (lanzan `L` e `I`). Total: **4N + 3 triggers** y **2N + 2 grupos**. Los grupos se asignan por encima del mas alto que use el nivel.
+Mas 2 Spawn de posicion en x = -30 (lanzan `L` e `I`). Total: **4N + 2 triggers** y **2N + 2 grupos**. Los grupos se asignan por encima del mas alto que use el nivel.
 
 ## Metodo 18: Capas (fondo + rests + parches)
 Reproduce el mecanismo del mod *GIF to GD*: en vez de dibujar cada frame entero, la animacion se descompone en capas que casi no cambian.
@@ -68,7 +68,7 @@ Analisis de lo visto en el juego (preview limpio, pero astillas / frames "amalga
 | Astillas / halo alrededor de la imagen (metodos 7, 8, 9, 10, 12, 15, 16, 17, 18, 19) | Rectangulos girados que se salian del lienzo (hasta ~68 px). El preview los recortaba; GD **no**. | `Geo` ya no genera formas que sobresalgan (las alineadas a ejes se recortan) y `sanitizeResult` (`src/engine/sanitize.hpp`) confina **todo** resultado en `convert()`: unico punto de entrada de todos los metodos. |
 | z-order con ~1000 valores distintos (metodos 7/8) | Un z por forma | Compactado a la profundidad real de solapamiento (16-20 valores). |
 | Frames "amalgamados" en el editor | El editor no ejecuta triggers: todos los frames se ven apilados | El **frame 0 se dibuja encima** (z mayor): el editor muestra el frame 0 limpio. En el juego solo hay un frame visible a la vez, asi que no cambia nada. (En 18/19 el editor muestra las capas apiladas: es lo esperado.) |
-| "Pido 3000 y sale como 1150" | El **Tope total de objetos** (40000 por defecto) reserva espacio para formas, triggers y paleta | La ventana muestra el presupuesto aplicado; los modos 18/19 verifican el recuento real y pueden recortar formas pequeñas, recalculando el PSNR. |
+| "Pido 3000 y sale como 1150" | El **Tope total de objetos** (40000 por defecto) recorta los objetos por frame en silencio | La ventana muestra el valor aplicado: `3000 (tope: 1176)`. Sube el tope en ajustes si lo necesitas. |
 
 Notas: la calidad sube de forma continua con el presupuesto (medido de 500 a 4000 objetos/frame en todos los metodos): no hay valores "buenos" y "malos". Con *Lado largo* pequeno (p. ej. 210 u) los objetos miden <1 unidad: sube el lado largo si se ve borroso.
 
@@ -78,7 +78,11 @@ Notas: la calidad sube de forma continua con el presupuesto (medido de 500 a 400
 
 Los triggers de arranque estan por defecto en x = -30: solo se ejecutan si juegas **desde el inicio del nivel**. Si pruebas con *Playtest desde la posicion del editor* o un Start Pos mas a la derecha, desactiva *Triggers de arranque en el inicio* para que queden junto a la imagen.
 
-| Triggers pisados / frames "amalgamados" | Triggers de frames en cuadricula (v0.4.4) | **Una sola fila, uno tras otro hacia la derecha** (paso 30 u, sin huecos); ninguno encima/debajo de otro. GD ejecuta los triggers de un mismo instante de izquierda a derecha, asi el orden de x es el orden de los frames. Solo los Color triggers pueden ir apilados. La prueba lo exige. |
+| Triggers pisados / frames "amalgamados" | Triggers de frames en cuadricula (v0.4.4) | **Dos filas, cada una hacia la derecha uno tras otro** (paso 30 u): **Alpha arriba, Spawn debajo**; los 2 Spawn de arranque apilados a la izquierda (x = -30). Ninguno comparte x con otro de su fila. Solo los Color triggers pueden ir apilados. La prueba lo exige. |
+
+| Frames cortados / sin triggers con ~200k objetos | Limite de objetos del editor (200000 en GD 2.2): GD corta el final de la cadena y los triggers iban al final | Tope total = 200000 - 3000 - objetos del nivel; triggers PRIMERO en la cadena; si no cabe no se coloca nada. Colocacion por tandas y sin seleccion masiva (>8000). |
+
+| Metodos 7 y 8 salian iguales | El 7 era BSP 6 % + rotados y el 8 BSP 15 % + rotados | 7 = Geometrize puro (fondo plano + girados); 8 = hibrido con 30 % de base BSP. |
 
 | Metodos 7/8 (y 4/18/19) se ven como el BSP grueso en el juego (bloques planos, sin detalle) aunque el preview es bueno | **z-order 0 = "por defecto" en GD**: se dibuja encima de los z 1..N, asi la base (z=0) tapaba todos los rectangulos girados | Nunca se emite z = 0: todo z se desplaza +1 (`zShift`). La prueba falla si aparece un z <= 0. Confirmable con el patron de calibracion (fila 3, derecha). |
 
@@ -96,9 +100,17 @@ Ajuste **Modo al colocar -> Patron de calibracion**: al pulsar *Colocar* se colo
 | 5 | 60 tiras de 0.5 u: degradado continuo | GD redondea posiciones/escalas sub-unidad |
 | 6 | Canales 2,3,4,5 (rojo, verde, azul, amarillo) por Color trigger, y los mismos colores en HSV | los colores de canal no se aplican en el editor |
 
-## Verificacion pendiente en Geode
-* `src/ui` y `src/main.cpp` no se pudieron compilar en este entorno porque no esta configurado `GEODE_SDK`; deben compilarse con Geode SDK 5.11.2 y probarse dentro de Geometry Dash. El motor sin dependencias de Geode si fue compilado y probado con los tests incluidos.
-* Los triggers se simulan en las pruebas sin Geode (flags Spawn Triggered/Multi-Trigger, orden horizontal, retardo del bucle y dos vueltas completas). Aun falta verificar su ejecucion real y el posicionamiento de inicio dentro de Geometry Dash.
+## Simulador de GD de punta a punta
+```
+g++ -O2 -std=c++20 -pthread -Iinclude -Isrc/engine -Itests tests/fullsim_test.cpp -o fullsim && ./fullsim tests/test.gif 6 600 12      # metodo 7, 600 obj/frame, 12 frames
+```
+Metodo 0..18 (17 = capas, 18 = arbol), objetos/frame, frames, canales (0/1), tope total. Genera la cadena EXACTA que iria a GD, la ejecuta con un modelo de GD y compara con el GIF.
+Es un **modelo** (no GD real): lo que no puede comprobar esta en "NO verificado".
+
+## NO verificado
+* `src/ui` y `src/main.cpp` **no se han compilado ni probado en el juego** (v0.5.0: tambien la colocacion por tandas, `PlaceRunner`, y la lectura del limite de objetos con `m_objects->count()`) (incluidas las ramas nuevas del metodo 18; el motor `layered.hpp` si esta probado) (se escribieron contra el patron del Image Exporter). Puede pedir algun ajuste menor.
+* Las claves de triggers (Alpha 1007: 51/35/10; Spawn 1268: 51/63/62/87; grupos 57) siguen el formato estandar de 2.2 pero no estan probadas en GD.
+* El limite de 200000 objetos del editor de GD 2.2 esta tomado de memoria (no se pudo verificar sin acceso a internet); esta como constante `kEditorObjectLimit` en `gifanim.hpp`.
 * Cada frame se convierte por separado (metodos 1-17): puede haber parpadeo entre frames. Los metodos 18 y 19 lo reducen mucho (fondo trazado una vez).
 * Retardos < 0.03 s se suben a 0.03 s (ajustable).
 

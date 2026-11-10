@@ -8,9 +8,9 @@
 	},
 	"id": "patasma.gif_importer",
 	"name": "GIF Importer",
-	"version": "v0.4.6-beta",
+	"version": "v0.5.0-beta",
 	"developer": "Patasma",
-	"description": "Importa GIFs animados al editor usando Alpha + Spawn triggers en bucle infinito. 17 metodos de imagen + metodo 18 por capas + metodo 19 arbol de deltas. BETA.",
+	"description": "Importa GIFs animados al editor usando Alpha triggers + Spawn triggers en bucle infinito. Eliges objetos por frame y metodo de imagen (17 metodos + 18 por capas + 19 arbol de deltas). BETA.",
 	"resources": {
 		"spritesheets": {
 			"GifBtn": [
@@ -45,7 +45,7 @@
 			"min": 2000,
 			"max": 150000,
 			"name": "Tope total de objetos",
-			"description": "Formas, triggers de animacion y Color Triggers de paleta incluidos en el limite total."
+			"description": "Objetos de todos los frames + triggers. Si frames x objetos por frame se pasa, se recortan los objetos por frame. <cr>Ademas nunca se pasa del limite del editor (200000 menos los objetos que ya tenga el nivel)</c>. En movil usa 60000 o menos."
 		},
 		"first-group": {
 			"type": "int",
@@ -53,7 +53,7 @@
 			"min": 1,
 			"max": 9000,
 			"name": "Primer grupo",
-			"description": "Los grupos se asignan por encima del grupo mas alto que ya use el nivel. Metodos 1-17: 2 x frames + 2 grupos; metodos 18/19: grupos segun las capas que se creen."
+			"description": "Los grupos se asignan por encima del grupo mas alto que ya use el nivel, pero nunca por debajo de este numero. Se usan <cy>2 x frames + 2</c> grupos."
 		},
 		"place-mode": {
 			"type": "string",

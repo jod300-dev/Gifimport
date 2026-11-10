@@ -30,10 +30,10 @@ inline const MethodInfo& methodInfo(Method m) {
          "Reduce la paleta y fusiona zonas iguales en rectangulos. Para ilustraciones.", false},
         {"6. Franjas horizontales",
          "Tiras de color por filas o columnas con tolerancia. Estilo escaneo, muy rapido.", false},
-        {"7. Rectangulos rotados",
-         "Rectangulos girados por busqueda aleatoria (estilo Geometrize). Aspecto pictorico.", true},
+        {"7. Rectangulos rotados (puro)",
+         "Fondo plano + SOLO rectangulos girados por busqueda aleatoria (estilo Primitive). Sin cuadricula: aspecto pictorico.", true},
         {"8. Hibrido BSP + rotados",
-         "Base BSP mas rectangulos rotados sobre los residuos. Maxima calidad.", true},
+         "Base de bloques BSP (30 % de los objetos) + rectangulos girados solo donde queda error. Mas limpio que el 7.", true},
         {"9. Halftone (diamantes)",
          "Trama de periodico: diamantes cuyo tamano sigue la oscuridad. Sin HSV.", false},
         {"10. Grabado de lineas",
@@ -127,6 +127,8 @@ inline Result convertImpl(const Image& srcIn, Method method, const Options& opt,
             int w, h; Image target;
             res.shapes = geometrizeShapes(src, o, method == Method::Hybrid ? hybridFractionFor(o) : 0.0, prog, w, h, &target);
             res.rasterW = w; res.rasterH = h; reference = std::move(target); haveRef = true;
+            if (method == Method::Hybrid && !res.shapes.empty() && std::all_of(res.shapes.begin(), res.shapes.end(), [](const Shape& s) { return s.rot == 0.f; }))
+                res.note = "El BSP solo ya es casi perfecto (>= 45 dB): no hicieron falta rectangulos girados.";
             break;
         }
         case Method::Halftone: case Method::Engrave: case Method::Hatch: case Method::Stipple:
