@@ -114,7 +114,11 @@ g++ -O2 -std=c++20 -pthread -Iinclude -Isrc/engine -Itests tests/fullsim_test.cp
 Metodo 0..18 (17 = capas, 18 = arbol), objetos/frame, frames, canales (0/1), tope total. Genera la cadena EXACTA que iria a GD, la ejecuta con un modelo de GD y compara con el GIF.
 Es un **modelo** (no GD real): lo que no puede comprobar esta en "NO verificado".
 
-## NO verificado
+## NO verificado (importante)
+* **Frames "amalgamados" con muchos frames (>15-20) en el metodo plano.** No he podido reproducirlo: con tus Unnamed_10/11 mi modelo de GD da imagenes limpias, pero tu captura del plano
+  se ve como si solo estuvieran las formas grandes (z bajo) de varios frames. Que GD pinte distinto de mi modelo (orden de z, desempates, clave 155 que GD anade al guardar) NO esta confirmado.
+  La v0.5.2 mete bandas de z disjuntas por frame para que no dependa de esos desempates. Si sigue pasando, el dato que falta: ¿se ve asi solo en el editor o tambien al jugar?
+
 * `src/ui` y `src/main.cpp` **no se han compilado ni probado en el juego** (v0.5.0: tambien la colocacion por tandas, `PlaceRunner`, y la lectura del limite de objetos con `m_objects->count()`) (incluidas las ramas nuevas del metodo 18; el motor `layered.hpp` si esta probado) (se escribieron contra el patron del Image Exporter). Puede pedir algun ajuste menor.
 * Las claves de triggers (Alpha 1007: 51/35/10; Spawn 1268: 51/63/62/87; grupos 57) siguen el formato estandar de 2.2 pero no estan probadas en GD.
 * El limite de 200000 objetos del editor de GD 2.2 esta tomado de memoria (no se pudo verificar sin acceso a internet); esta como constante `kEditorObjectLimit` en `gifanim.hpp`.

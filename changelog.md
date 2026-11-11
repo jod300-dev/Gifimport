@@ -1,3 +1,12 @@
+# v0.5.2-beta
+- Color triggers: **cuadricula compacta** (paso 30 u en x e y, 20 columnas, sin huecos). Antes 48 u x 52 u, con espacios entre ellos. La prueba lo comprueba.
+- Z-order: **cada frame tiene su PROPIA banda de z** (disjunta; frame 0 la mas alta, el ultimo la mas baja). Antes todos los frames menos el 0 compartian el rango
+  1..N y sus formas se intercalaban cuando varios frames estaban apilados/visibles a la vez. Con bandas disjuntas el frame de la banda alta tapa por completo al de abajo
+  aunque GD resuelva distinto los empates de z. Lo mismo para los rests y parches del metodo 18 (fondo < rests < parches, cada uno en su banda). Si no caben (> 30000 niveles) se usa el esquema antiguo.
+- Analisis de tus dos .gmd (Unnamed_10 = metodo 18/19 con 37 frames; Unnamed_11 = metodo plano de 37 frames, 500 objetos/frame): en mi modelo de GD los dos se ven limpios
+  (el apilado del editor muestra el frame 0 completo). La captura "amalgamada" del plano coincide visualmente con "solo se ven las primeras ~35 formas grandes de cada frame":
+  la causa EXACTA en GD no esta confirmada (ver README, "NO verificado").
+
 # v0.5.1-beta
 - FIX COMPILACION (Windows, Geode 5.11.2): `Notification::waitAndHide` no existe. El progreso de la colocacion por tandas ahora es una etiqueta propia (`CCLabelBMFont`)
   y el aviso final es una `Notification::create(..., 3.5f)->show()` normal (como en versiones anteriores). Era el unico error del log.

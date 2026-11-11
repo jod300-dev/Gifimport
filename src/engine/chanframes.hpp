@@ -42,7 +42,7 @@ inline std::vector<std::array<uint8_t, 3>> quantizeFrames(std::vector<Result>& r
 // Un Color trigger (id 899) por canal de la paleta, a la izquierda del inicio (se ejecutan al empezar el nivel).
 inline void appendColorTriggers(std::string& out, const std::vector<std::array<uint8_t, 3>>& palette, int firstChannel, double trigX, double sy) {
     for (size_t i = 0; i < palette.size(); ++i) {
-        const double cx = trigX - 48.0 * double(1 + int(i) % 20), cy = sy + 90.0 + 52.0 * double(int(i) / 20);
+        const double cx = trigX - 30.0 * double(1 + int(i) % 20), cy = sy + 90.0 + 30.0 * double(int(i) / 20);   // cuadricula compacta: 30 u, sin huecos
         detail::addTriggerHead(out, 899, cx, cy);
         out += ",7,"; out += std::to_string(palette[i][0]);
         out += ",8,"; out += std::to_string(palette[i][1]);
@@ -68,14 +68,13 @@ inline std::string buildGifStringCh(const std::vector<Result>& results, const Gi
     for (auto& r : results) total += r.shapes.size();
     if (total == 0) return fail("Ningun frame genero objetos");
     out.reserve(total * 100 + size_t(gifTriggerCount(N) + int(palette.size())) * 90);
-    int zSpan = 1;                                           // frame 0 encima de los demas (editor limpio; en el juego no importa)
-    for (auto& r : results) for (auto& sh : r.shapes) zSpan = std::max<int>(zSpan, sh.z + 1);
+    const std::vector<int> zBands = detail::frameBands(results, p.eo.zBase);   // bandas de z disjuntas por frame (frame 0 arriba)
     for (int i = 0; i < N; ++i) {
         const Result& r = results[size_t(i)];
         if (r.shapes.empty()) continue;
         GdExportOptions eo = p.eo;
         eo.groupStr = std::to_string(G0 + i);
-        eo.zBase = p.eo.zBase + (i == 0 ? zSpan : 0);
+        eo.zBase = zBands[size_t(i)];
         eo.monoFastPath = false;
         ChannelMap cm = buildChannelMap(r);                          // orden de aparicion de los colores de ESTE frame -> canal global
         eo.channels.assign(cm.colors.size(), 0);

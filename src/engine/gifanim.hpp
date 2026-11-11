@@ -133,6 +133,27 @@ inline void triggersFirst(std::string& out, size_t objEnd) {
 }
 } // namespace detail
 
+
+namespace detail {
+// z-order de cada frame: BANDAS DISJUNTAS, frame 0 la mas alta (editor limpio) y el ultimo la mas baja. Asi dos frames nunca se mezclan
+// aunque GD resuelva distinto los empates de z o haya dos frames visibles a la vez: el de la banda alta tapa por completo al de abajo.
+// (Antes todos los frames menos el 0 compartian el rango 1..N y sus formas se intercalaban.)  Si no cabe (> 30000), se comparte.
+inline std::vector<int> frameBands(const std::vector<Result>& results, int zBase) {
+    const size_t n = results.size();
+    std::vector<int> span(n, 1), base(n, zBase);
+    long total = 0;
+    for (size_t i = 0; i < n; ++i) { for (auto& sh : results[i].shapes) span[i] = std::max<int>(span[i], sh.z + 1); total += span[i]; }
+    if (total > 30000) {                                           // demasiados niveles: esquema antiguo (frame 0 encima, el resto comparte)
+        int mx = 1; for (int v : span) mx = std::max(mx, v);
+        for (size_t i = 0; i < n; ++i) base[i] = zBase + (i == 0 ? mx : 0);
+        return base;
+    }
+    long acc = 0;
+    for (size_t k = n; k-- > 0;) { base[k] = zBase + int(acc); acc += span[k]; }
+    return base;
+}
+} // namespace detail
+
 constexpr int kGifTriggersPerFrame = 4;
 inline int gifTriggerCount(int frames) { return kGifTriggersPerFrame * frames + 3; }   // +1: Spawn(I) en cada vuelta
 inline int gifGroupCount(int frames) { return 2 * frames + 2; }
@@ -225,8 +246,7 @@ inline std::string buildGifString(const std::vector<Result>& results, const GifP
 
     // El editor no ejecuta triggers: todos los frames se ven apilados. El frame 0 va ENCIMA (z-order mayor) para que en el
     // editor se vea limpio; en el juego solo hay un frame visible a la vez, asi que el orden entre frames no importa.
-    int zSpan = 1;
-    for (auto& r : results) for (auto& sh : r.shapes) zSpan = std::max<int>(zSpan, sh.z + 1);
+    const std::vector<int> zBands = detail::frameBands(results, p.eo.zBase);
 
     // --- objetos de cada frame, cada uno en su grupo G_i
     for (int i = 0; i < N; ++i) {
@@ -234,7 +254,7 @@ inline std::string buildGifString(const std::vector<Result>& results, const GifP
         if (r.shapes.empty()) continue;
         GdExportOptions eo = p.eo;
         eo.groupStr = std::to_string(G0 + i);
-        eo.zBase = p.eo.zBase + (i == 0 ? zSpan : 0);
+        eo.zBase = zBands[size_t(i)];
         eo.monoFastPath = r.mono && !r.colored;
         std::string s = toGdString(r, eo);
         if (s.empty()) continue;

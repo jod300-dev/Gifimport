@@ -882,9 +882,22 @@ inline std::string buildLayeredString(const LayeredAnim& a, const GifPlan& plan,
         std::string s = toGdString(r, eo);
         if (!s.empty()) { out += s; out += ';'; }
     };
+    // z-order: fondo < rests < parches, y cada rest/parche en su PROPIA banda de z (disjuntas; la mas alta = la primera). Asi las capas
+    // que no estan visibles a la vez nunca se intercalan entre si, ni siquiera apiladas en el editor. Si no cabe (> 30000) se comparte.
+    std::vector<int> zRestB(size_t(std::max(K, 0)), a.zRest), zPatchB(size_t(N), a.zPatch);
+    {
+        long total = a.zRest;
+        for (int k = 0; k < K; ++k) total += lay::maxZ(a.rests[size_t(k)]) + 1;
+        for (int i = 0; i < N; ++i) total += lay::maxZ(a.patches[size_t(i)]) + 1;
+        if (total <= 30000) {
+            long acc = a.zRest;
+            for (int k = K - 1; k >= 0; --k) { zRestB[size_t(k)] = int(acc); acc += lay::maxZ(a.rests[size_t(k)]) + 1; }
+            for (int i = N - 1; i >= 0; --i) { zPatchB[size_t(i)] = int(acc); acc += lay::maxZ(a.patches[size_t(i)]) + 1; }
+        }
+    }
     emit(a.still, 0, 0);
-    for (int k = 0; k < K; ++k) emit(a.rests[size_t(k)], gRest[size_t(k)], a.zRest);
-    for (int i = 0; i < N; ++i) emit(a.patches[size_t(i)], gPatch[size_t(i)], a.zPatch);
+    for (int k = 0; k < K; ++k) emit(a.rests[size_t(k)], gRest[size_t(k)], zRestB[size_t(k)]);
+    for (int i = 0; i < N; ++i) emit(a.patches[size_t(i)], gPatch[size_t(i)], zPatchB[size_t(i)]);
 
     // --- triggers (se mueven al principio de la cadena al final: ver triggersFirst)
     const size_t objEnd = out.size();

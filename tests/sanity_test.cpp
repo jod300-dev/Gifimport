@@ -16,6 +16,7 @@
 #include "deltatree.hpp"
 #include "calib.hpp"
 #include "sheet.hpp"
+#include <map>
 #include <fstream>
 #include <iostream>
 #include <set>
@@ -43,6 +44,35 @@ static int triggerOverlaps(const std::string& s) {
     if (!fa && !fs && !(yA > yS)) ++bad;                          // Alpha ARRIBA, Spawn DEBAJO
     for (size_t i = 0; i < start.size(); ++i) for (size_t j = i + 1; j < start.size(); ++j)
         if (std::abs(start[i].first - start[j].first) > 0.01 || std::abs(start[i].second - start[j].second) < 29.0) ++bad;   // apilados
+    return bad;
+}
+
+// Color triggers: cuadricula COMPACTA (paso 30 u en x e y, sin huecos). Cada y tiene columnas consecutivas.
+static int colorGridGaps(const std::string& s) {
+    std::map<long, std::vector<long>> rows; int bad = 0;
+    for (auto& kv : parse(s)) {
+        if (!kv.count(1) || std::stoi(kv.at(1)) != 899) continue;
+        rows[std::lround(std::stod(kv.at(3)))].push_back(std::lround(std::stod(kv.at(2))));
+    }
+    long prevY = 0; bool first = true;
+    for (auto& r : rows) {
+        auto xs = r.second; std::sort(xs.begin(), xs.end());
+        for (size_t i = 1; i < xs.size(); ++i) if (xs[i] - xs[i - 1] != 30) ++bad;      // huecos entre columnas
+        if (!first && r.first - prevY != 30) ++bad;                                     // huecos entre filas
+        prevY = r.first; first = false;
+    }
+    return bad;
+}
+// z-order: los frames (grupos) usan bandas de z DISJUNTAS
+static int zBandOverlaps(const std::string& s) {
+    std::map<int, std::pair<int, int>> zr;
+    for (auto& kv : parse(s)) {
+        if (!kv.count(1) || std::stoi(kv.at(1)) != 3092 || !kv.count(57)) continue;
+        int g = std::stoi(kv.at(57)), z = std::stoi(kv.at(25));
+        auto it = zr.find(g); if (it == zr.end()) zr[g] = {z, z}; else { it->second.first = std::min(it->second.first, z); it->second.second = std::max(it->second.second, z); }
+    }
+    std::vector<std::pair<int, int>> v; for (auto& k : zr) v.push_back(k.second); std::sort(v.begin(), v.end());
+    int bad = 0; for (size_t i = 1; i < v.size(); ++i) if (v[i].first <= v[i - 1].second) ++bad;
     return bad;
 }
 // los triggers van ANTES que los objetos (un recorte por el limite del editor nunca debe dejar la animacion sin triggers)
@@ -97,6 +127,8 @@ int main(int argc, char** argv) {
             if (str.empty()) { fail("metodo " + std::to_string(m + 1) + ": cadena vacia"); continue; }
             if (int ov = triggerOverlaps(str)) fail("metodo " + std::to_string(m + 1) + ": " + std::to_string(ov) + " pares de triggers se pisan");
             if (!triggersBeforeObjects(str)) fail("metodo " + std::to_string(m + 1) + ": hay triggers DESPUES de los objetos");
+            if (int zo = zBandOverlaps(str)) fail("metodo " + std::to_string(m + 1) + ": " + std::to_string(zo) + " frames con rangos de z solapados");
+            if (int gg = colorGridGaps(str)) fail("metodo " + std::to_string(m + 1) + ": Color triggers con " + std::to_string(gg) + " huecos");
             GdSize sz = gdImageSize(res[0], p.eo);
             double zf0 = -1e9, zOthers = -1e9;
             for (auto& kv : parse(str)) {
