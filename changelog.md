@@ -1,3 +1,18 @@
+# v0.5.3-beta
+- **Decodificador de GIF propio** (`src/engine/gifdecode.hpp`). stb_image componia MAL los GIF con "disposal 3" (restaurar al frame anterior) y el error se acumula frame a frame:
+  restos de otros frames y "estatica" en los ultimos frames. El nuevo sigue la especificacion (disposal 0-3, transparencia, tablas locales/globales, entrelazado, subrectangulos),
+  es **identico pixel a pixel a Pillow** en 22 GIFs de prueba (`tests/check_decoder.py`) y no falla con archivos truncados/corruptos (40 mutaciones bajo ASan/UBSan).
+  Sigue decodificando en streaming con tope de memoria (400 MB, reduciendo frames si hace falta). stb queda solo como respaldo.
+- **Color triggers**: la cuadricula compacta (30 u x 30 u, 20 columnas, sin huecos) ahora la usan TODOS los modos. Los metodos 18 y 19 tenian su propio codigo con 48 x 52 u (por eso
+  seguian saliendo con huecos en tus Unnamed_10/11/12). Una sola funcion (`detail::colorTriggerPos`) y una prueba por modo.
+- **Calibracion + prueba de bucle**: "Patron de calibracion" ahora anade debajo 12 frames SINTETICOS conocidos (fondo de color de la rueda cromatica, franja negra que gira, cuadrado blanco que
+  avanza) con la animacion real (triggers, grupos, bandas de z, bucle). Al jugarlo deben verse 12 colores en orden, sin mezclas, y el ultimo frame (rosa) pasando limpio al primero (rojo).
+  Sirve para separar "fallo de triggers/bucle en GD" de "fallo de los datos del GIF".
+- Analisis de tus Unnamed_12 (arbol, 16 frames) y Unnamed_13 (plano, 16 frames, 1150 obj/frame): en mi simulacion de GD la logica de triggers es correcta (un solo frame visible por paso;
+  el arbol muestra las cadenas de deltas correctas, con z de hijo > z de padre) y la calidad por frame NO baja al final con el motor (PSNR estable con 1 y 4 hilos). Lo que si se ve en los
+  DATOS de los ultimos frames es "estatica" en el vestido: apunta a la entrada (decodificacion) y no a los triggers.
+- Arreglo de un `vexing parse` en calib.hpp (aviso del compilador).
+
 # v0.5.2-beta
 - Color triggers: **cuadricula compacta** (paso 30 u en x e y, 20 columnas, sin huecos). Antes 48 u x 52 u, con espacios entre ellos. La prueba lo comprueba.
 - Z-order: **cada frame tiene su PROPIA banda de z** (disjunta; frame 0 la mas alta, el ultimo la mas baja). Antes todos los frames menos el 0 compartian el rango

@@ -22,6 +22,7 @@
 #define STBI_NO_STDIO
 #endif
 #include "stb_image.h"     // solo declaraciones; la implementacion esta en stb_impl.cpp
+#include "gifdecode.hpp"
 
 namespace gdx {
 
@@ -43,6 +44,24 @@ constexpr size_t kGifMaxBytes = 400u * 1024u * 1024u;
 inline GifData decodeGif(const uint8_t* data, size_t len, size_t maxBytes = kGifMaxBytes) {
     GifData g;
     if (!data || len < 10) { g.error = "El archivo esta vacio o no es un GIF"; return g; }
+    // 1) decodificador propio (composicion correcta de disposal 0-3; ver gifdecode.hpp)
+    {
+        gifdec::Out o;
+        if (gifdec::decode(data, len, maxBytes, o) && o.frames >= 1) {
+            if (o.frames < 2) { g.error = "El GIF solo tiene 1 frame (no es animado)"; return g; }
+            g.w = o.w; g.h = o.h; g.srcW = o.srcW; g.srcH = o.srcH;
+            const size_t fs = size_t(o.w) * size_t(o.h) * 4;
+            g.frames.resize(size_t(o.frames)); g.delaysMs.resize(size_t(o.frames));
+            for (int i = 0; i < o.frames; ++i) {
+                g.frames[size_t(i)].w = o.w; g.frames[size_t(i)].h = o.h;
+                g.frames[size_t(i)].rgba.assign(o.rgba.begin() + std::ptrdiff_t(size_t(i) * fs), o.rgba.begin() + std::ptrdiff_t(size_t(i + 1) * fs));
+                const int d = o.delaysMs[size_t(i)];
+                g.delaysMs[size_t(i)] = d <= 10 ? 100 : d;       // igual que los navegadores: 0-10 ms => 100 ms
+            }
+            return g;
+        }
+    }
+    // 2) respaldo: stb_image (por si el archivo tiene algo raro que el decodificador propio no entiende)
     int* delays = nullptr;
     int w = 0, h = 0, z = 0, sw = 0, sh = 0;
     unsigned char* px = stbi_load_gif_scaled_from_memory(data, int(len), &delays, &z, &w, &h, &sw, &sh, maxBytes);
@@ -60,7 +79,7 @@ inline GifData decodeGif(const uint8_t* data, size_t len, size_t maxBytes = kGif
         g.frames[size_t(i)].w = w; g.frames[size_t(i)].h = h;
         g.frames[size_t(i)].rgba.assign(px + size_t(i) * fs, px + size_t(i + 1) * fs);
         int d = delays[i];
-        g.delaysMs[size_t(i)] = d <= 10 ? 100 : d;       // igual que los navegadores: 0-10 ms => 100 ms
+        g.delaysMs[size_t(i)] = d <= 10 ? 100 : d;
     }
     stbi_image_free(px);
     stbi_image_free(delays);
@@ -112,6 +131,12 @@ struct TrigBoard {
     double rowY() const { return spawnY; }                           // y del primer Spawn de arranque (el segundo va 30 u mas arriba)
     double nextY() const { return alphaY + 60.0; }                   // base para los Color triggers (encima de las dos filas)
 };
+// Posicion de los Color triggers: UNA sola cuadricula compacta para TODOS los modos (paso 30 u en x e y, 20 columnas, sin huecos),
+// a la izquierda del inicio y encima de las filas de Alpha/Spawn.
+inline void colorTriggerPos(int i, double trigX, double sy, double& cx, double& cy) {
+    cx = trigX - 30.0 * double(1 + i % 20);
+    cy = sy + 90.0 + 30.0 * double(i / 20);
+}
 // x inicial de las filas: a la derecha de los triggers de arranque (trigX) y no antes del borde izquierdo de la imagen
 inline double rowLeft(double imageLeft, double trigX) { return std::max(imageLeft, trigX + 60.0); }
 } // namespace detail

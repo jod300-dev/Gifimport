@@ -42,7 +42,7 @@ inline std::vector<std::array<uint8_t, 3>> quantizeFrames(std::vector<Result>& r
 // Un Color trigger (id 899) por canal de la paleta, a la izquierda del inicio (se ejecutan al empezar el nivel).
 inline void appendColorTriggers(std::string& out, const std::vector<std::array<uint8_t, 3>>& palette, int firstChannel, double trigX, double sy) {
     for (size_t i = 0; i < palette.size(); ++i) {
-        const double cx = trigX - 30.0 * double(1 + int(i) % 20), cy = sy + 90.0 + 30.0 * double(int(i) / 20);   // cuadricula compacta: 30 u, sin huecos
+        double cx, cy; detail::colorTriggerPos(int(i), trigX, sy, cx, cy);
         detail::addTriggerHead(out, 899, cx, cy);
         out += ",7,"; out += std::to_string(palette[i][0]);
         out += ",8,"; out += std::to_string(palette[i][1]);

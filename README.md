@@ -115,6 +115,10 @@ Metodo 0..18 (17 = capas, 18 = arbol), objetos/frame, frames, canales (0/1), top
 Es un **modelo** (no GD real): lo que no puede comprobar esta en "NO verificado".
 
 ## NO verificado (importante)
+* **"Estatica" en los ultimos frames / ultimo frame que desaparece / bucle entrecortado (modos 7 y 8).** El decodificador de GIF anterior (stb) comparte un fallo demostrado con disposal 3, y es la
+  causa mas probable si tu GIF lo usa, pero NO he podido comprobarlo con tu GIF concreto. Si sigue pasando con la v0.5.3, usa "Patron de calibracion" y juega el nivel: si los 12 colores salen
+  limpios, el bucle/triggers estan bien y el problema esta en los datos de ese GIF; si salen mezclados, es un problema de triggers/orden en GD y hace falta saber en que frame ocurre.
+
 * **Frames "amalgamados" con muchos frames (>15-20) en el metodo plano.** No he podido reproducirlo: con tus Unnamed_10/11 mi modelo de GD da imagenes limpias, pero tu captura del plano
   se ve como si solo estuvieran las formas grandes (z bajo) de varios frames. Que GD pinte distinto de mi modelo (orden de z, desempates, clave 155 que GD anade al guardar) NO esta confirmado.
   La v0.5.2 mete bandas de z disjuntas por frame para que no dependa de esos desempates. Si sigue pasando, el dato que falta: ¿se ve asi solo en el editor o tambien al jugar?

@@ -168,6 +168,7 @@ int main(int argc, char** argv) {
         if (str.empty()) { fail(tag + ": cadena vacia " + err); continue; }
         if (int ov = triggerOverlaps(str)) fail(tag + ": " + std::to_string(ov) + " pares de triggers se pisan");
         if (!triggersBeforeObjects(str)) fail(tag + ": hay triggers DESPUES de los objetos");
+        if (int gg = colorGridGaps(str)) fail(tag + ": Color triggers con " + std::to_string(gg) + " huecos");
         GdSize sz = gdImageSize(A.still, p.eo);
         for (auto& kv : parse(str)) {
             if (std::stoi(kv.at(1)) != p.eo.objectId) continue;
@@ -227,6 +228,13 @@ int main(int argc, char** argv) {
     // patron de calibracion: cadena bien formada, 115 objetos HSV + 4 de canal (2..5) + 4 Color triggers, z=300 presente, sin canal 1
     {
         GdExportOptions eo; eo.originX = 1000; eo.originY = 500;
+        {   // prueba de bucle dentro de la calibracion: 12 frames, triggers delante, sin pisarse, bandas de z disjuntas
+            auto cl = buildCalibration(eo, -30, 777);
+            if (triggerOverlaps(cl.str)) fail("calibracion+bucle: triggers que se pisan");
+            int alphas = 0, groups = 0; for (auto& kv : parse(cl.str)) { if (!kv.count(1)) continue; int id = std::stoi(kv.at(1)); if (id == 1007) ++alphas; if (id == 3092 && kv.count(57)) ++groups; }
+            if (alphas != 2 * 12 + 11 || groups < 12 * 3) fail("calibracion+bucle: esperaba 35 Alpha y 36 objetos con grupo, hay " + std::to_string(alphas) + "/" + std::to_string(groups));
+            ++checks;
+        }
         auto cr = buildCalibration(eo, -30);
         int hsv = 0, chs = 0, trig = 0, zmax = 0, bad1 = 0, malformed = 0;
         std::set<int> chans;

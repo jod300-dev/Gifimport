@@ -779,8 +779,8 @@ void GifPopup::finishBuild(std::shared_ptr<BuildJob> job) {
         const std::string pm = mod->getSettingValue<std::string>("place-mode");
         const bool sheet = pm.rfind("Hoja", 0) == 0, solo = pm.rfind("Solo", 0) == 0, calib = pm.rfind("Patron", 0) == 0;
         if (calib) {                                            // patron de calibracion: no usa el GIF
-            auto cr = gdx::buildCalibration(p.eo, p.trigX);
-            this->startPlacement(cr.str, 130, "Patron de calibracion colocado");
+            auto cr = gdx::buildCalibration(p.eo, p.trigX, p.baseGroup);   // + prueba de bucle (12 frames sinteticos)
+            this->startPlacement(cr.str, 400, "Patron de calibracion + prueba de bucle colocados (juega el nivel: 12 colores en orden)");
             this->onClose(nullptr);
             return;
         }

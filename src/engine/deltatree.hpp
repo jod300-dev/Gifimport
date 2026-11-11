@@ -348,7 +348,7 @@ inline std::string buildTreeString(const LayeredAnim& a, const GifPlan& plan, co
     if (hasI) detail::addSpawn(out, p, sx, board.rowY() + 30.0, I, 0, 0);   // y lanza I, justo ENCIMA (los dos de arranque van apilados)
     if (useCh) {
         for (size_t i = 0; i < a.palette.size(); ++i) {
-            const double cx = p.trigX - 48.0 * double(1 + int(i) % 20), cy = sy + 90.0 + 52.0 * double(int(i) / 20);
+            double cx, cy; detail::colorTriggerPos(int(i), p.trigX, sy, cx, cy);
             detail::addTriggerHead(out, 899, cx, cy);
             out += ",7,"; out += std::to_string(a.palette[i][0]); out += ",8,"; out += std::to_string(a.palette[i][1]);
             out += ",9,"; out += std::to_string(a.palette[i][2]);

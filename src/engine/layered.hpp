@@ -937,7 +937,7 @@ inline std::string buildLayeredString(const LayeredAnim& a, const GifPlan& plan,
 
     if (useCh) {                                               // Color triggers (id 899) al inicio: fijan el color de cada canal
         for (size_t i = 0; i < a.palette.size(); ++i) {
-            const double cx = p.trigX - 48.0 * double(1 + int(i) % 20), cy = sy + 90.0 + 52.0 * double(int(i) / 20);
+            double cx, cy; detail::colorTriggerPos(int(i), p.trigX, sy, cx, cy);
             detail::addTriggerHead(out, 899, cx, cy);
             out += ",7,"; out += std::to_string(a.palette[i][0]);
             out += ",8,"; out += std::to_string(a.palette[i][1]);

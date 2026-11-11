@@ -7,6 +7,7 @@
 //    Fila 4  tamanos diminutos (alto 6, 3, 1.5, 0.75, 0.4, 0.2 unidades)
 //    Fila 5  teselado sub-unidad: 60 tiras de 0.5 u forman un degradado continuo (si hay huecos/bandas, GD redondea posiciones/escalas)
 //    Fila 6  canales de color 2,3,4,5 (rojo, verde, azul, amarillo) con Color triggers, junto a los mismos colores en HSV
+//    PRUEBA DE BUCLE (debajo): 12 frames sinteticos con la animacion real (triggers, grupos, bandas de z): ver buildLoopTest
 //  Sin dependencias de Geode.
 // ============================================================================
 #pragma once
@@ -16,7 +17,38 @@ namespace gdx {
 
 struct CalibResult { std::string str; Result hsv, chan; std::vector<std::array<uint8_t, 3>> palette; double hsvCenterY = 0, chanCenterY = 0; };
 
-inline CalibResult buildCalibration(GdExportOptions eo, double trigX) {
+// PRUEBA DE BUCLE (si baseGroup > 0): 12 frames sinteticos CONOCIDOS pasados por el mismo exportador de animacion que usan los metodos 1-17
+// (grupos, Alpha/Spawn, bandas de z por frame, bucle con autocorreccion). Cada frame = fondo de un color distinto (rueda de color), una franja
+// negra girada (15 grados por frame) y un cuadrado blanco que avanza de izquierda a derecha. Al JUGAR el nivel se debe ver:
+//   - los 12 colores en orden, uno cada 0,1 s, SIN mezclas ni parpadeos de otros colores
+//   - la franja girando y el cuadrado blanco avanzando sin saltos
+//   - el bucle limpio: del ultimo frame (rosa) pasa directo al primero (rojo), sin que el ultimo desaparezca ni se quede un frame a medias
+// En el editor (sin jugar) se ve apilado: debe verse el frame 0 (rojo) completo encima.
+inline std::string buildLoopTest(GdExportOptions eo, double trigX, int baseGroup, double centerY) {
+    const int N = 12;
+    std::vector<Result> res; res.resize(size_t(N));
+    GifPlan plan;
+    for (int i = 0; i < N; ++i) {
+        Result& r = res[size_t(i)]; r.rasterW = 120; r.rasterH = 80; r.aspect = 1.5f;
+        const float h = 360.f * float(i) / float(N);                        // hue -> rgb
+        const float c = 0.8f, x = c * (1.f - std::fabs(std::fmod(h / 60.f, 2.f) - 1.f)), m = 0.2f;
+        float rr = 0, gg = 0, bb = 0;
+        if (h < 60) { rr = c; gg = x; } else if (h < 120) { rr = x; gg = c; } else if (h < 180) { gg = c; bb = x; }
+        else if (h < 240) { gg = x; bb = c; } else if (h < 300) { rr = x; bb = c; } else { rr = c; bb = x; }
+        auto add = [&](float cx, float cy, float w, float hh, float rot, uint8_t R, uint8_t G, uint8_t B, int z) {
+            Shape sh; sh.cx = cx; sh.cy = cy; sh.w = w; sh.h = hh; sh.rot = rot; sh.r = R; sh.g = G; sh.b = B; sh.z = int16_t(z); r.shapes.push_back(sh);
+        };
+        add(60, 40, 120, 80, 0, uint8_t((rr + m) * 255), uint8_t((gg + m) * 255), uint8_t((bb + m) * 255), 0);
+        add(60, 40, 90, 6, 15.f * float(i), 0, 0, 0, 1);
+        add(8.f + 9.f * float(i), 68, 10, 10, 0, 255, 255, 255, 2);
+        plan.idx.push_back(i); plan.delay.push_back(0.1);
+    }
+    plan.total = 0.1 * N;
+    GifExportParams p; p.eo = eo; p.eo.longSide = 120; p.eo.originY = centerY; p.eo.groupStr.clear(); p.eo.channels.clear(); p.baseGroup = baseGroup; p.trigX = trigX;
+    return buildGifString(res, plan, p, nullptr);
+}
+
+inline CalibResult buildCalibration(GdExportOptions eo, double trigX, int baseGroup = 0) {
     CalibResult cr;
     const uint8_t RED[3] = {230, 30, 30}, BLUE[3] = {30, 60, 230}, GRAY[3] = {150, 150, 150}, GREEN[3] = {30, 180, 60}, BLACK[3] = {0, 0, 0};
     Result A; A.rasterW = 320; A.rasterH = 150; A.aspect = 320.f / 150.f;
@@ -68,6 +100,10 @@ inline CalibResult buildCalibration(GdExportOptions eo, double trigX) {
     std::string sB = toGdString(B, eoB);
     cr.str = sA + ";" + sB + ";";                               // ';' final: appendColorTriggers concatena a continuacion
     appendColorTriggers(cr.str, cr.palette, kFirstColorChannel, trigX, eo.originY + 150 * 0.5 + 60);
+    if (baseGroup > 0) {                                           // prueba de bucle debajo del patron (+ sus triggers y los 2 de arranque)
+        cr.str += buildLoopTest(eo, trigX - 150, baseGroup, eo.originY - 400);
+        cr.str += ";";
+    }
     if (!cr.str.empty() && cr.str.back() == ';') cr.str.pop_back();
     cr.hsv = std::move(A); cr.chan = std::move(B);
     cr.hsvCenterY = eo.originY; cr.chanCenterY = eoB.originY;
