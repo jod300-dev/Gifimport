@@ -28,25 +28,31 @@ namespace gdx {
 // ------------------------------------------------------------ decodificar ---
 
 struct GifData {
-    int w = 0, h = 0;
+    int w = 0, h = 0;                 // tamano de los frames guardados (puede ser menor que el del archivo si se redujo por memoria)
+    int srcW = 0, srcH = 0;           // tamano original del GIF
     std::vector<Image> frames;        // cada frame ya compuesto (lienzo completo)
     std::vector<int> delaysMs;        // retardo original de cada frame
     std::string error;
     bool ok() const { return error.empty() && frames.size() >= 2; }
 };
 
-inline GifData decodeGif(const uint8_t* data, size_t len) {
+// Tope de memoria de los frames decodificados (RGBA). Si el GIF lo pasa, los frames se reducen (promedio k x k) al decodificar:
+// la geometria final no depende de la resolucion (el raster de trabajo ya se limita a "max-raster", <= 1024 px).
+constexpr size_t kGifMaxBytes = 400u * 1024u * 1024u;
+
+inline GifData decodeGif(const uint8_t* data, size_t len, size_t maxBytes = kGifMaxBytes) {
     GifData g;
+    if (!data || len < 10) { g.error = "El archivo esta vacio o no es un GIF"; return g; }
     int* delays = nullptr;
-    int w = 0, h = 0, z = 0, c = 0;
-    unsigned char* px = stbi_load_gif_from_memory(data, int(len), &delays, &w, &h, &z, &c, 4);
-    if (!px) { g.error = "No se pudo leer el GIF"; return g; }
+    int w = 0, h = 0, z = 0, sw = 0, sh = 0;
+    unsigned char* px = stbi_load_gif_scaled_from_memory(data, int(len), &delays, &z, &w, &h, &sw, &sh, maxBytes);
+    if (!px) { g.error = "No se pudo leer el GIF (archivo danado o formato no soportado)"; return g; }
     if (z < 2 || !delays) {
         stbi_image_free(px); if (delays) stbi_image_free(delays);
         g.error = "El GIF solo tiene 1 frame (no es animado)";
         return g;
     }
-    g.w = w; g.h = h;
+    g.w = w; g.h = h; g.srcW = sw; g.srcH = sh;
     const size_t fs = size_t(w) * size_t(h) * 4;
     g.frames.resize(size_t(z));
     g.delaysMs.resize(size_t(z));

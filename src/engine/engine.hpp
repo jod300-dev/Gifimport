@@ -8,6 +8,7 @@
 #include "geometrize.hpp"
 #include "sanitize.hpp"
 #include "mono.hpp"
+#include <cstring>
 
 namespace gdx {
 
@@ -59,7 +60,7 @@ inline const MethodInfo& methodInfo(Method m) {
 }
 
 // Convierte la imagen a formas con el método indicado. Garantiza shapes.size() + textRows.size() <= opt.budget.
-inline Result convertImpl(const Image& srcIn, Method method, const Options& opt, Progress* prog) {
+inline Result convertCore(const Image& srcIn, Method method, const Options& opt, Progress* prog) {
     Result res;
     double t0 = nowMs();
     Options o = opt;
@@ -83,12 +84,9 @@ inline Result convertImpl(const Image& srcIn, Method method, const Options& opt,
         ras = resizeArea(src, w, h);
     };
 
-    // Las formas libres que se solapan no pueden dejar huecos transparentes:
-    // con transparencia se usa BSP (que sí respeta los bordes) y se avisa.
-    if (res.hadAlpha && (method == Method::Geometrize || method == Method::Hybrid)) {
-        method = Method::BSP;
-        res.note = "Imagen con transparencia: se uso BSP (los rectangulos rotados no pueden dejar huecos).";
-    }
+    // Con transparencia, los rectangulos girados (7/8) solo se colocan dentro de la zona opaca (Geo::setValid); se avisa en la nota.
+    if (res.hadAlpha && (method == Method::Geometrize || method == Method::Hybrid))
+        res.note = "Imagen con transparencia: los rectangulos girados solo van dentro de la zona opaca.";
 
     Image reference;            // raster contra el que se mide el PSNR
     bool haveRef = false;
@@ -127,8 +125,9 @@ inline Result convertImpl(const Image& srcIn, Method method, const Options& opt,
             int w, h; Image target;
             res.shapes = geometrizeShapes(src, o, method == Method::Hybrid ? hybridFractionFor(o) : 0.0, prog, w, h, &target);
             res.rasterW = w; res.rasterH = h; reference = std::move(target); haveRef = true;
-            if (method == Method::Hybrid && !res.shapes.empty() && std::all_of(res.shapes.begin(), res.shapes.end(), [](const Shape& s) { return s.rot == 0.f; }))
-                res.note = "El BSP solo ya es casi perfecto (>= 45 dB): no hicieron falta rectangulos girados.";
+            if (method == Method::Hybrid && !res.shapes.empty() && std::all_of(res.shapes.begin(), res.shapes.end(), [](const Shape& s) { return s.rot == 0.f; })
+                && computePsnr(reference.empty() ? target : reference, renderShapes(res.shapes, w, h), std::clamp(o.alphaThreshold, 1, 255)) >= 40.0)
+                res.note = "El BSP solo ya es casi perfecto: no hicieron falta rectangulos girados.";
             break;
         }
         case Method::Halftone: case Method::Engrave: case Method::Hatch: case Method::Stipple:
@@ -185,6 +184,49 @@ inline Result convertImpl(const Image& srcIn, Method method, const Options& opt,
     res.ms = nowMs() - t0;
     report(prog, 1.f);
     return res;
+}
+
+
+// Recorta una imagen con transparencia a la caja de sus pixeles opacos (+ margen). Devuelve false si no vale la pena recortar.
+inline bool opaqueBounds(const Image& im, int thr, int& x0, int& y0, int& x1, int& y1) {
+    x0 = im.w; y0 = im.h; x1 = -1; y1 = -1;
+    for (int y = 0; y < im.h; ++y)
+        for (int x = 0; x < im.w; ++x)
+            if (im.at(x, y)[3] >= thr) { x0 = std::min(x0, x); x1 = std::max(x1, x); y0 = std::min(y0, y); y1 = std::max(y1, y); }
+    if (x1 < 0) return false;
+    x0 = std::max(0, x0 - 1); y0 = std::max(0, y0 - 1); x1 = std::min(im.w - 1, x1 + 1); y1 = std::min(im.h - 1, y1 + 1);
+    const double crop = double(x1 - x0 + 1) * double(y1 - y0 + 1), full = double(im.w) * double(im.h);
+    return crop <= full * 0.85;
+}
+
+// GIF con transparencia: un sprite pequeno en un lienzo grande transparente perdia casi todo el presupuesto y la resolucion
+// (cuadricula de celdas mas grandes que el sprite, 0 objetos...). Se convierte SOLO la caja opaca y las formas se recolocan en el
+// lienzo completo (mismas coordenadas para todos los frames: el raster es proporcional al lienzo, exacto en cada eje).
+inline Result convertImpl(const Image& srcIn, Method method, const Options& opt, Progress* prog) {
+    int bx0, by0, bx1, by1;
+    const int thr = std::clamp(opt.alphaThreshold, 1, 255);
+    if (!srcIn.empty() && hasTransparency(srcIn, thr) && opaqueBounds(srcIn, thr, bx0, by0, bx1, by1)) {
+        const int cw = bx1 - bx0 + 1, ch = by1 - by0 + 1;
+        Image crop; crop.w = cw; crop.h = ch; crop.rgba.resize(size_t(cw) * ch * 4);
+        for (int y = 0; y < ch; ++y) std::memcpy(crop.at(0, y), srcIn.at(bx0, by0 + y), size_t(cw) * 4);
+        Result r = convertCore(crop, method, opt, prog);
+        if (r.rasterW > 0 && r.rasterH > 0 && !r.cancelled) {
+            const double kx = double(cw) / r.rasterW, ky = double(ch) / r.rasterH;           // px del raster recortado -> px de la imagen
+            const double natural = std::max(r.rasterW * double(srcIn.w) / cw, r.rasterH * double(srcIn.h) / ch);
+            const double cap = 1536.0;                                                       // el raster completo no pasa de 1536 px (memoria)
+            const double sc = natural > cap ? cap / natural : 1.0;
+            const int RW = std::max(1, int(std::lround(srcIn.w * (r.rasterW / double(cw)) * sc))), RH = std::max(1, int(std::lround(srcIn.h * (r.rasterH / double(ch)) * sc)));
+            const double fx = double(RW) / srcIn.w, fy = double(RH) / srcIn.h;               // px de la imagen -> px del raster completo
+            for (auto& sh : r.shapes) {
+                sh.cx = float((bx0 + sh.cx * kx) * fx); sh.cy = float((by0 + sh.cy * ky) * fy);
+                sh.w = float(sh.w * kx * fx);          sh.h = float(sh.h * ky * fy);
+            }
+            r.rasterW = RW; r.rasterH = RH; r.aspect = float(srcIn.w) / float(srcIn.h);
+            return r;
+        }
+        return r;
+    }
+    return convertCore(srcIn, method, opt, prog);
 }
 
 // Punto de entrada UNICO: convierte y aplica el saneado comun (formas dentro del lienzo, z-order compacto).

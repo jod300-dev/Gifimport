@@ -183,7 +183,8 @@ inline LayeredAnim buildTree(const GifData& g, const GifPlan& plan, const Option
     const int trigEst = 6 * N + 16;
     const double T = std::max(40.0, std::min(double(lo.perFrame) * N, double(lo.maxTotal) - trigEst));
     A.budgetTotal = int(T);
-    const double reuseArea = double(std::clamp(lo.reuse, 0.f, 0.2f)) * double(W) * H;
+    double contentArea = 1; for (int i = 0; i < N; ++i) contentArea = std::max(contentArea, double(lay::opaqueCount(orig[size_t(i)], thr)));   // relativo al contenido, no al lienzo
+    const double reuseArea = double(std::clamp(lo.reuse, 0.f, 0.2f)) * contentArea;
     A.patches.resize(size_t(N));
     for (auto& r : A.patches) { r.rasterW = W; r.rasterH = H; r.aspect = H > 0 ? float(W) / H : 1.f; }
     std::vector<Image> comp; comp.resize(size_t(N));
@@ -398,8 +399,10 @@ inline void capAnim(LayeredAnim& A, int maxTotal) {
         for (auto& r : A.rests) if (r.shapes.size() > 1) { layers.push_back(&r); trimmable += long(r.shapes.size()) - 1; }
         for (auto& r : A.patches) if (r.shapes.size() > 1) { layers.push_back(&r); trimmable += long(r.shapes.size()) - 1; }
         if (trimmable <= 0) {                                         // solo queda el fondo: se recorta (lo mas fino primero)
-            long keep = std::max<long>(1, long(A.still.shapes.size()) - excess);
-            A.still.shapes.resize(size_t(keep));
+            if (!A.still.shapes.empty()) {
+                long keep = std::max<long>(1, long(A.still.shapes.size()) - excess);
+                A.still.shapes.resize(size_t(keep));
+            }
             break;
         }
         const double f = std::min(1.0, double(excess) / double(trimmable) + 0.002);

@@ -139,10 +139,12 @@ std::vector<Shape> bestFirstTree(const Stats& st, int budget, Splitter splitter,
         nodes.push_back(n);
         int i = int(nodes.size()) - 1;
         const SplitInfo& sp = nodes[i].sp;
-        if (sp.nk > 0 && sp.gain > 1e-9) {
+        if (sp.nk > 0) {
             double g2 = 0;
             for (int k = 0; k < sp.nk; ++k) g2 = std::max(g2, splitCached(sp.kids[k]).gain);
-            pq.push({std::max(sp.gain, 0.5 * (sp.gain + g2)), i});
+            // Con corte fijo (quadtree) la ganancia del primer nivel puede ser EXACTAMENTE 0 aunque la zona sea mixta (p. ej. un
+            // sprite simetrico respecto al centro): se mira tambien un nivel mas abajo para no dejarlo sin dividir nunca.
+            if (sp.gain > 1e-9 || g2 > 1e-9) pq.push({std::max(sp.gain, 0.5 * (sp.gain + g2)), i});
         }
         return i;
     };
@@ -243,10 +245,14 @@ inline size_t pyrRun(const Stats& st, double lam, size_t budget, bool record, st
     return c.abort ? budget + 1 : c.count;
 }
 
+inline std::vector<Shape> treeShapes(const Image& raster, int budget, int alphaThr, bool bsp, Progress* prog);
 inline std::vector<Shape> pyramidShapes(const Image& raster, int budget, int alphaThr, Progress* prog) {
     Stats st; st.build(raster, alphaThr);
     size_t B = size_t(std::max(1, budget));
     double lo = 0.5, hi = 3.0 * 255 * 255 * double(raster.w) * raster.h;
+    // Con transparencia, los bloques opacos del quadtree que quedan sin "color visible" se pintan SIEMPRE (no dependen de lambda): si
+    // solo esos ya superan el presupuesto, ninguna lambda sirve (antes: bucle infinito). Se cae a BSP, que respeta cualquier presupuesto.
+    if (pyrRun(st, hi, B, false, nullptr) > B) return treeShapes(raster, budget, alphaThr, true, prog);
     if (pyrRun(st, lo, B, false, nullptr) <= B) hi = lo;         // cabe incluso sin pérdida
     else {
         for (int it = 0; it < 44 && hi / lo > 1.004; ++it) {
@@ -255,7 +261,7 @@ inline std::vector<Shape> pyramidShapes(const Image& raster, int budget, int alp
             report(prog, 0.5f * float(it + 1) / 44.f);
             if (isCancelled(prog)) break;
         }
-        while (pyrRun(st, hi, B, false, nullptr) > B) hi *= 1.02;  // seguridad
+        for (int g = 0; g < 400 && pyrRun(st, hi, B, false, nullptr) > B; ++g) hi *= 1.02;  // seguridad (acotada)
     }
     // Segunda fase: los bloques padre totalmente tapados por sus hijos no se ven. Se cuentan solo las formas
     // visibles, así que se puede bajar lambda (más detalle) hasta llenar el presupuesto de verdad.
@@ -281,7 +287,8 @@ inline std::vector<Shape> pyramidShapes(const Image& raster, int budget, int alp
     }
     std::vector<Shape> out;
     visible(hi, &out);
-    while (out.size() > B) { hi *= 1.03; visible(hi, &out); }       // seguridad
+    for (int g = 0; g < 400 && out.size() > B; ++g) { hi *= 1.03; visible(hi, &out); }       // seguridad (acotada)
+    if (out.size() > B) return treeShapes(raster, budget, alphaThr, true, prog);
     return out;
 }
 

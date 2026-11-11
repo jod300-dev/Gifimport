@@ -72,7 +72,7 @@ namespace {
         size_t next = 0, placed = 0, totalObjs = 0;
         bool selectAfter = false;
         std::string doneMsg;
-        Ref<Notification> note;
+        Ref<CCLabelBMFont> label;                                   // progreso (propio, sin depender de la API de Notification)
         CCArray* selected = nullptr;
 
         static PlaceRunner* create() {
@@ -80,14 +80,22 @@ namespace {
             if (r && r->init()) { r->autorelease(); return r; }
             delete r; return nullptr;
         }
-        ~PlaceRunner() { if (selected) selected->release(); }
+        ~PlaceRunner() {
+            if (selected) selected->release();
+            if (label && label->getParent()) label->removeFromParent();
+        }
 
         void begin(std::vector<std::string> p, size_t total, bool select, std::string const& msg) {
             parts = std::move(p); totalObjs = total; doneMsg = msg;
             selectAfter = select && total <= 8000;                    // seleccionar decenas de miles de objetos tambien cuelga el editor
             if (selectAfter) { selected = CCArray::create(); selected->retain(); }
-            note = Notification::create("Colocando objetos... 0%", NotificationIcon::Loading, 0.f);
-            note->show();
+            if (auto scene = CCDirector::sharedDirector()->getRunningScene()) {
+                label = CCLabelBMFont::create("Colocando objetos... 0%", "bigFont.fnt");
+                auto ws = CCDirector::sharedDirector()->getWinSize();
+                label->setScale(0.55f);
+                label->setPosition({ws.width / 2.f, ws.height - 28.f});
+                scene->addChild(label, 9999);
+            }
             this->schedule(schedule_selector(PlaceRunner::step));
         }
 
@@ -108,7 +116,7 @@ namespace {
             if (next >= parts.size()) { this->finish(true); return; }
             char buf[96];
             std::snprintf(buf, sizeof buf, "Colocando objetos... %d%%", int(100.0 * double(next) / double(std::max<size_t>(1, parts.size()))));
-            if (note) note->setString(buf);
+            if (label) label->setString(buf);
         }
 
         void finish(bool ok) {
@@ -116,11 +124,9 @@ namespace {
             if (ok && selected && selected->count() > 0) {
                 if (auto* ed = EditorUI::get()) ed->selectObjects(selected, true);
             }
-            if (note) {
-                note->setString(ok ? doneMsg : std::string("Colocacion cancelada (se salio del editor)"));
-                note->setIcon(ok ? NotificationIcon::Success : NotificationIcon::Error);
-                note->waitAndHide();
-            }
+            if (label && label->getParent()) label->removeFromParent();
+            Notification::create(ok ? doneMsg : std::string("Colocacion cancelada (se salio del editor)"),
+                                 ok ? NotificationIcon::Success : NotificationIcon::Error, 3.5f)->show();
             this->removeFromParent();
         }
     };
@@ -363,9 +369,10 @@ void GifPopup::loadGifBytes(std::vector<uint8_t> const& bytes) {
         this->setStatus(gif->error.empty() ? "GIF no valido" : gif->error, "", "Necesitas un GIF con 2 o mas frames");
         return;
     }
-    if (int64_t(gif->w) * gif->h * int64_t(gif->frames.size()) > 400000000LL) {
-        this->setStatus("GIF demasiado grande", "(reduce su tamano o frames)");
-        return;
+    if (gif->srcW > 0 && (gif->srcW != gif->w || gif->srcH != gif->h)) {      // el decodificador lo redujo para no pasar del tope de memoria
+        char nb[160];
+        std::snprintf(nb, sizeof nb, "GIF grande (%dx%d, %d frames): reducido a %dx%d para ahorrar memoria", gif->srcW, gif->srcH, int(gif->frames.size()), gif->w, gif->h);
+        Notification::create(nb, NotificationIcon::Info, 4.f)->show();
     }
     m_gif = gif;
     m_layered = nullptr;

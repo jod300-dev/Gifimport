@@ -100,6 +100,13 @@ Ajuste **Modo al colocar -> Patron de calibracion**: al pulsar *Colocar* se colo
 | 5 | 60 tiras de 0.5 u: degradado continuo | GD redondea posiciones/escalas sub-unidad |
 | 6 | Canales 2,3,4,5 (rojo, verde, azul, amarillo) por Color trigger, y los mismos colores en HSV | los colores de canal no se aplican en el editor |
 
+## Banco de robustez (GIFs dificiles)
+```
+python3 tests/make_fuzz_gifs.py     # genera ./fuzz_gifs/*.gif (tamanos extremos, transparencia, disposal 1-3, retardos raros...)
+g++ -O1 -g -fsanitize=address,undefined -std=c++20 -pthread -Iinclude -Isrc/engine -Itests tests/fuzz_gifs.cpp -o fuzz_gifs && ./fuzz_gifs fuzz_gifs/trans_sprite_d3.gif 300 40
+```
+Pasa el GIF por los 19 metodos (HSV y canales), simula el resultado y avisa de fallos, vacios o excepciones. En mono (9-17) solo comprueba que no falle ni salga vacio.
+
 ## Simulador de GD de punta a punta
 ```
 g++ -O2 -std=c++20 -pthread -Iinclude -Isrc/engine -Itests tests/fullsim_test.cpp -o fullsim && ./fullsim tests/test.gif 6 600 12      # metodo 7, 600 obj/frame, 12 frames

@@ -430,6 +430,11 @@ STBIDEF stbi_uc *stbi_load_from_file  (FILE *f, int *x, int *y, int *channels_in
 
 #ifndef STBI_NO_GIF
 STBIDEF stbi_uc *stbi_load_gif_from_memory(stbi_uc const *buffer, int len, int **delays, int *x, int *y, int *z, int *comp, int req_comp);
+
+// ---- Anadido por GIF Importer: decodificacion en streaming con tope de memoria ----------------------------------------------
+// Decodifica frame a frame y, si w*h*4*frames > maxBytes, reduce cada frame (promedio de k x k pixeles) para no pasar de maxBytes.
+// Devuelve RGBA8 de *z frames de *outW x *outH; delays[i] en ms. *srcW/*srcH = tamano original. 0 = fallo.
+STBIDEF stbi_uc *stbi_load_gif_scaled_from_memory(stbi_uc const *buffer, int len, int **delays, int *z, int *outW, int *outH, int *srcW, int *srcH, size_t maxBytes);
 #endif
 
 #ifdef STBI_WINDOWS_UTF8
@@ -6957,6 +6962,79 @@ static void *stbi__load_gif_main_outofmem(stbi__gif *g, stbi_uc *out, int **dela
    return stbi__errpuc("outofmem", "Out of memory");
 }
 
+// ---- Anadido por GIF Importer: decodificacion en streaming con tope de memoria ----------------------------------------------
+static int stbi__gif_stream(stbi_uc const *buffer, int len, int k, stbi_uc *out, int *delays, int ow, int oh, int *nFrames, int *sw, int *sh)
+{
+   stbi__context s;
+   stbi__gif g;
+   stbi_uc *prev1 = 0, *prev2 = 0, *tmp = 0;
+   int n = 0, comp = 0;
+   size_t ostride = (size_t) ow * oh * 4, fstride = 0;
+   stbi__start_mem(&s, buffer, len);
+   if (!stbi__gif_test(&s)) return 0;
+   memset(&g, 0, sizeof(g));
+   for (;;) {
+      stbi_uc *u = stbi__gif_load_next(&s, &g, &comp, 4, n >= 2 ? prev2 : 0);
+      if (u == (stbi_uc *) &s) u = 0;                    // marcador de fin
+      if (!u) break;
+      if (n == 0) {
+         *sw = g.w; *sh = g.h; fstride = (size_t) g.w * g.h * 4;
+         if (out) {                                       // 2a pasada: buffers de los dos frames anteriores (completos) para el disposal 3
+            prev1 = (stbi_uc *) STBI_MALLOC(fstride); prev2 = (stbi_uc *) STBI_MALLOC(fstride);
+            if (!prev1 || !prev2) { STBI_FREE(prev1); STBI_FREE(prev2); STBI_FREE(g.out); STBI_FREE(g.history); STBI_FREE(g.background); return 0; }
+         }
+      }
+      if (out) {
+         if (delays) delays[n] = g.delay;
+         stbi_uc *dst = out + (size_t) n * ostride;
+         if (k <= 1) memcpy(dst, u, fstride);
+         else {
+            for (int y = 0; y < oh; ++y)
+               for (int x = 0; x < ow; ++x) {
+                  unsigned sum[4] = {0, 0, 0, 0}, cnt = 0, aw = 0;
+                  for (int yy = y * k; yy < y * k + k && yy < g.h; ++yy)
+                     for (int xx = x * k; xx < x * k + k && xx < g.w; ++xx) {
+                        const stbi_uc *q = u + ((size_t) yy * g.w + xx) * 4;
+                        sum[0] += q[0] * q[3]; sum[1] += q[1] * q[3]; sum[2] += q[2] * q[3]; sum[3] += q[3]; aw += q[3]; ++cnt;
+                     }
+                  stbi_uc *d = dst + ((size_t) y * ow + x) * 4;
+                  if (aw > 0) { d[0] = (stbi_uc) (sum[0] / aw); d[1] = (stbi_uc) (sum[1] / aw); d[2] = (stbi_uc) (sum[2] / aw); d[3] = (stbi_uc) (sum[3] / cnt); }
+                  else { d[0] = d[1] = d[2] = d[3] = 0; }
+               }
+         }
+         // rotar: prev2 <- prev1 <- u (u es el buffer interno g.out, que se reutiliza)
+         tmp = prev2; prev2 = prev1; prev1 = tmp; memcpy(prev1, u, fstride);
+      }
+      ++n;
+   }
+   STBI_FREE(g.out); STBI_FREE(g.history); STBI_FREE(g.background);
+   STBI_FREE(prev1); STBI_FREE(prev2);
+   *nFrames = n;
+   return 1;
+}
+
+STBIDEF stbi_uc *stbi_load_gif_scaled_from_memory(stbi_uc const *buffer, int len, int **delays, int *z, int *outW, int *outH, int *srcW, int *srcH, size_t maxBytes)
+{
+   int n = 0, sw = 0, sh = 0, k = 1, ow, oh, i;
+   stbi_uc *out; int *dl;
+   // pasada 1: solo cuenta frames (sin guardar nada)
+   if (!stbi__gif_stream(buffer, len, 1, 0, 0, 0, 0, &n, &sw, &sh) || n < 1 || sw < 1 || sh < 1) return 0;
+   while ((size_t) ((sw + k - 1) / k) * (size_t) ((sh + k - 1) / k) * 4u * (size_t) n > maxBytes && k < 64) ++k;
+   ow = (sw + k - 1) / k; oh = (sh + k - 1) / k;
+   out = (stbi_uc *) STBI_MALLOC((size_t) ow * oh * 4u * (size_t) n);
+   dl = (int *) STBI_MALLOC(sizeof(int) * (size_t) n);
+   if (!out || !dl) { STBI_FREE(out); STBI_FREE(dl); return 0; }
+   for (i = 0; i < n; ++i) dl[i] = 0;
+   {
+      int n2 = 0, sw2 = 0, sh2 = 0;
+      if (!stbi__gif_stream(buffer, len, k, out, dl, ow, oh, &n2, &sw2, &sh2) || n2 < 1) { STBI_FREE(out); STBI_FREE(dl); return 0; }
+      n = n2 < n ? n2 : n;
+   }
+   *z = n; *outW = ow; *outH = oh; *srcW = sw; *srcH = sh; *delays = dl;
+   return out;
+}
+
+
 static void *stbi__load_gif_main(stbi__context *s, int **delays, int *x, int *y, int *z, int *comp, int req_comp)
 {
    if (stbi__gif_test(s)) {
@@ -7017,7 +7095,7 @@ static void *stbi__load_gif_main(stbi__context *s, int **delays, int *x, int *y,
             }
             memcpy( out + ((layers - 1) * stride), u, stride );
             if (layers >= 2) {
-               two_back = out - 2 * stride;
+               two_back = out + (layers - 2) * stride;   // FIX (stb 2.30): antes "out - 2 * stride" apuntaba FUERA del buffer (GIF con disposal 3)
             }
 
             if (delays) {

@@ -1,3 +1,18 @@
+# v0.5.1-beta
+- FIX COMPILACION (Windows, Geode 5.11.2): `Notification::waitAndHide` no existe. El progreso de la colocacion por tandas ahora es una etiqueta propia (`CCLabelBMFont`)
+  y el aviso final es una `Notification::create(..., 3.5f)->show()` normal (como en versiones anteriores). Era el unico error del log.
+- COMPATIBILIDAD con cualquier GIF (probado con ~30 GIFs dificiles x 19 metodos x HSV/canales, con ASan/UBSan: `tests/fuzz_gifs.cpp`, `tests/make_fuzz_gifs.py`):
+  - stb_image 2.29: error con GIFs de disposal 3 ("restaurar al frame anterior"): `two_back` apuntaba fuera del buffer (cierre del juego / frames basura). Corregido.
+  - GIFs con transparencia: BSP, Quadtree y los metodos 7/8 daban 0 objetos cuando el sprite estaba rodeado de transparencia (la penalizacion de alfa daba ganancia 0 al partir
+    zonas mixtas): ahora es una impureza de Gini (concava). El Quadtree tambien mira un nivel mas abajo cuando la ganancia es exactamente 0.
+  - Cada frame con transparencia se recorta a su zona opaca antes de convertir (todo el presupuesto va al sprite) y se recoloca en el lienzo completo.
+  - 7 y 8 con transparencia: los rectangulos girados solo se colocan dentro de la zona opaca; si no caben se completa con BSP y se elige el mejor.
+  - Metodo 4 (Piramide): bucle infinito con ciertos frames transparentes; ahora acotado, con BSP de respaldo.
+  - Metodos 18/19: el fondo comun solo incluye pixeles opacos en TODOS los frames (un parche pinta pero no borra); el fondo puede estar vacio; el umbral de reutilizacion es
+    relativo al contenido, no al lienzo (un sprite pequeno dejaba todos los frames "casi iguales" y 0 objetos).
+  - Memoria: decodificacion por streaming con tope de 400 MB; si el GIF lo pasa, los frames se reducen al decodificar (se avisa). Ya no se rechaza "GIF demasiado grande".
+  - Con GIFs opacos el resultado es identico al de la 0.5.0 (mismos PSNR).
+
 # v0.5.0-beta
 - FIX (metodos 7 y 8 eran practicamente el mismo): el 7 era "BSP del 6 % + rotados" y el 8 "BSP del 15 % + rotados" (y el 8 se quedaba en BSP puro si ya llegaba a 38 dB).
   Ahora el **7 es Geometrize puro** (un fondo plano de 1 objeto + solo rectangulos girados, estilo Primitive: sin cuadricula) y el **8 es el hibrido de verdad**

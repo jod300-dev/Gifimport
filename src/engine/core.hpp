@@ -260,7 +260,10 @@ struct Stats {
         double e = 0;
         if (q.n > 0) e = q.sq - (q.sr * q.sr + q.sg * q.sg + q.sb * q.sb) / q.n;
         if (e < 0) e = 0;
-        e += kAlphaPenalty * std::min(q.n, q.area - q.n);
+        // Impureza de Gini (concava) en vez de min(n, area-n): con min(), partir una zona mixta (p. ej. un sprite en el centro de un lienzo
+        // transparente) daba ganancia 0 y el BSP/quadtree no dividia NUNCA -> 0 objetos en GIFs con transparencia. Con Gini cada corte que
+        // separa opaco de transparente reduce el error, asi el arbol recorta el contorno del sprite.
+        if (q.area > 0) e += kAlphaPenalty * 2.0 * double(q.n) * double(q.area - q.n) / double(q.area);
         return e;
     }
     static bool mostlyOpaque(const Q& q) { return q.n * 2 >= q.area && q.n > 0; }

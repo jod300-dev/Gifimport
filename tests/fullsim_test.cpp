@@ -37,7 +37,7 @@ int main(int argc, char** argv) {
     }
     double tms = nowMs() - t0;
     if (chain.empty()) { std::cout << "FAIL build: " << err << "\n"; return 1; }
-    const double ppu = 0.6;
+    const double ppu = getenv("PPU") ? atof(getenv("PPU")) : 0.6;   // PPU = (ancho del gif)/600 para comparar 1:1 sin remuestrear
     GdSize sz = gdImageSize(Result{}, p.eo); (void)sz;
     // tamano de imagen: aspecto del gif
     double asp = double(g.w) / g.h; double sw = asp >= 1 ? 600 : 600 * asp, sh = asp >= 1 ? 600 / asp : 600;

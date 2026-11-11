@@ -25,6 +25,16 @@ public:
         L = float(std::max(W, H));
     }
 
+    // GIF con transparencia: los rectangulos solo pueden cubrir pixeles OPACOS (valid[i] = 1). Los transparentes no cuentan como error.
+    void setValid(const std::vector<uint8_t>& valid) {
+        hasMask = true;
+        invPrefix.assign(size_t(W + 1) * H, 0);
+        for (int y = 0; y < H; ++y)
+            for (int x = 0; x < W; ++x)
+                invPrefix[size_t(y) * (W + 1) + x + 1] = invPrefix[size_t(y) * (W + 1) + x] + (valid[size_t(y) * W + x] ? 0 : 1);
+        mask = valid;
+    }
+
     // Lienzo inicial (color plano o imagen ya dibujada).
     void setCanvasFlat(uint8_t r, uint8_t g, uint8_t b) {
         for (int i = 0; i < W * H; ++i) { canvas[i * 3] = r; canvas[i * 3 + 1] = g; canvas[i * 3 + 2] = b; }
@@ -93,6 +103,9 @@ private:
     std::vector<uint8_t> canvas;
     int tx = 0, ty = 0;
     std::vector<double> tileErr;
+    bool hasMask = false;
+    std::vector<uint8_t> mask;                 // 1 = pixel opaco
+    std::vector<int32_t> invPrefix;            // por fila: cuantos pixeles transparentes hay antes de x
 
     void recomputeAll() {
         std::fill(tileErr.begin(), tileErr.end(), 0.0);
@@ -100,7 +113,7 @@ private:
             for (int x = 0; x < W; ++x) {
                 Px& p = px[size_t(y) * W + x];
                 int dr = p.r - canvas[(size_t(y) * W + x) * 3], dg = p.g - canvas[(size_t(y) * W + x) * 3 + 1], db = p.b - canvas[(size_t(y) * W + x) * 3 + 2];
-                p.e = dr * dr + dg * dg + db * db;
+                p.e = (hasMask && !mask[size_t(y) * W + x]) ? 0 : dr * dr + dg * dg + db * db;
                 tileErr[size_t(y / kTile) * tx + x / kTile] += p.e;
             }
     }
@@ -147,13 +160,15 @@ private:
     Ev eval(const Cand& c) const {
         if (!fits(c)) return Ev{};
         double n = 0, sr = 0, sg = 0, sb = 0, stt = 0, se = 0;
+        bool touchesHole = false;
         forSpans(c, [&](int y, int xs, int xe) {
+            if (hasMask && invPrefix[size_t(y) * (W + 1) + xe + 1] - invPrefix[size_t(y) * (W + 1) + xs] > 0) { touchesHole = true; return; }
             const Px* p = &px[size_t(y) * W + xs];
             for (int x = xs; x <= xe; ++x, ++p) { sr += p->r; sg += p->g; sb += p->b; stt += p->tt; se += p->e; }
             n += xe - xs + 1;
         });
         Ev e;
-        if (n < 1) return e;
+        if (touchesHole || n < 1) return e;       // nunca sobre transparente
         e.mr = sr / n; e.mg = sg / n; e.mb = sb / n;
         e.gain = se - (stt - (sr * sr + sg * sg + sb * sb) / n);
         return e;
@@ -166,7 +181,7 @@ private:
                 size_t i = size_t(y) * W + x;
                 canvas[i * 3] = R; canvas[i * 3 + 1] = G; canvas[i * 3 + 2] = B;
                 int dr = px[i].r - R, dg = px[i].g - G, db = px[i].b - B;
-                px[i].e = dr * dr + dg * dg + db * db;
+                px[i].e = (hasMask && !mask[i]) ? 0 : dr * dr + dg * dg + db * db;
             }
             bx0 = std::min(bx0, xs); bx1 = std::max(bx1, xe); by0 = std::min(by0, y); by1 = std::max(by1, y);
         });
@@ -268,7 +283,7 @@ inline std::vector<Shape> geometrizeShapes(const Image& src, const Options& o, d
     uint8_t mr, mg, mb;
     Image target = compositeOnMean(ras, o.alphaThreshold, mr, mg, mb);
     outW = W; outH = H;
-    if (targetOut) *targetOut = target;
+    if (targetOut) *targetOut = hasTransparency(ras, o.alphaThreshold) ? ras : target;   // con alfa, el PSNR se mide contra el raster con huecos
     const int budget = std::max(1, o.budget);
     const int quality = effectiveQuality(o);
 
@@ -277,17 +292,29 @@ inline std::vector<Shape> geometrizeShapes(const Image& src, const Options& o, d
     if (hybrid) {
         std::vector<Shape> full = treeShapes(ras, budget, o.alphaThreshold, true, nullptr);
         Image r = renderShapes(full, W, H);
-        if (computePsnr(target, r, 1) >= 45.0 && !isCancelled(prog)) { for (auto& s : full) s.z = 0; report(prog, 1.f); return full; }
+        if (!hasTransparency(ras, o.alphaThreshold) && computePsnr(target, r, 1) >= 45.0 && !isCancelled(prog)) { for (auto& s : full) s.z = 0; report(prog, 1.f); return full; }
     }
 
     std::vector<Shape> shapes;
     Geo geo(target, o.seed);
+    const bool alphaImg = hasTransparency(ras, o.alphaThreshold);
+    if (alphaImg) {                                              // los rectangulos solo dentro de la zona opaca
+        std::vector<uint8_t> valid(size_t(W) * H, 0);
+        for (size_t i = 0; i < valid.size(); ++i) valid[i] = ras.rgba[i * 4 + 3] >= o.alphaThreshold ? 1 : 0;
+        geo.setValid(valid);
+    }
     int z0 = 1;
     {
         if (hybrid) {
             // 8. HIBRIDO: base BSP (una parte GRANDE del presupuesto, se ve la estructura de bloques) + rotados sobre el residuo.
             int b1 = std::max(1, int(budget * hybridBase));
             shapes = treeShapes(ras, b1, o.alphaThreshold, true, nullptr);
+            for (auto& s : shapes) s.z = 0;
+            Image base = renderShapes(shapes, W, H);
+            geo.setCanvasImage(base, mr, mg, mb);
+        } else if (alphaImg) {
+            // 7 con transparencia: no cabe un fondo plano (taparia lo transparente). Base BSP (45 %): cubre el contorno opaco, donde un rectangulo girado no cabe sin tocar lo transparente.
+            shapes = treeShapes(ras, std::max(1, int(budget * 0.45)), o.alphaThreshold, true, nullptr);
             for (auto& s : shapes) s.z = 0;
             Image base = renderShapes(shapes, W, H);
             geo.setCanvasImage(base, mr, mg, mb);
@@ -316,6 +343,15 @@ inline std::vector<Shape> geometrizeShapes(const Image& src, const Options& o, d
     }
     refitVisible(shapes, target, 255, true);
     if (int(shapes.size()) > budget) shapes.resize(size_t(budget));
+    // Con transparencia los girados casi nunca caben (no pueden tocar lo transparente) y el presupuesto se queda sin gastar:
+    // se compara con un BSP de presupuesto completo y se devuelve el mejor (medido sobre el raster con huecos).
+    if (alphaImg && !isCancelled(prog) && int(shapes.size()) < budget) {
+        std::vector<Shape> full = treeShapes(ras, budget, o.alphaThreshold, true, nullptr);
+        for (auto& s2 : full) s2.z = 0;
+        const double pa = computePsnr(ras, renderShapes(shapes, W, H), o.alphaThreshold);
+        const double pb = computePsnr(ras, renderShapes(full, W, H), o.alphaThreshold);
+        if (pb > pa) shapes = std::move(full);
+    }
     return shapes;
 }
 

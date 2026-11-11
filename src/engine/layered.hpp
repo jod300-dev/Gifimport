@@ -85,7 +85,7 @@ struct LayeredAnim {
         for (auto& r : patches) n += r.shapes.size();
         return n;
     }
-    bool ok() const { return !cancelled && W > 0 && frames >= 2 && !still.shapes.empty(); }
+    bool ok() const { return !cancelled && W > 0 && frames >= 2 && objectCount() > 0; }   // el fondo puede estar vacio (GIF con transparencia donde el sprite se mueve)
 };
 
 inline const char* layeredName() { return "18. Capas: fondo + rests + parches"; }
@@ -126,7 +126,8 @@ inline Image blur3(const Image& s, int thr) {
     return o;
 }
 
-// Mediana temporal por pixel (fondo "tipico"). Un pixel es transparente si lo es en la mitad o mas de los frames.
+// Mediana temporal por pixel (fondo "tipico"). Un pixel solo es opaco si lo es en TODOS los frames: un parche puede pintar encima pero
+// nunca borrar, asi que un fondo opaco donde algun frame es transparente dejaria un error permanente en ese frame (GIF con transparencia).
 inline Image temporalMedian(const std::vector<Image>& fr, int thr) {
     const int N = int(fr.size()), W = fr[0].w, H = fr[0].h;
     Image m; m.w = W; m.h = H; m.rgba.assign(size_t(W) * H * 4, 0);
@@ -139,7 +140,7 @@ inline Image temporalMedian(const std::vector<Image>& fr, int thr) {
             if (q[3] < thr) continue;
             a[0][size_t(n)] = q[0]; a[1][size_t(n)] = q[1]; a[2][size_t(n)] = q[2]; ++n;
         }
-        if (n * 2 < N || n == 0) continue;                       // transparente
+        if (n < N || n == 0) continue;                           // transparente en algun frame: no va al fondo
         uint8_t* o = &m.rgba[p * 4];
         for (int c = 0; c < 3; ++c) {
             auto mid = a[c].begin() + n / 2;
@@ -624,7 +625,10 @@ inline LayeredAnim buildLayered(const GifData& g, const GifPlan& plan, const Opt
     A.patchOf.assign(size_t(N), -1);
     std::vector<int> keepers;
     {
-        const double thrArea = double(std::clamp(lo.reuse, 0.f, 0.2f)) * double(W) * H;
+        // relativo al CONTENIDO (pixeles opacos del frame mas lleno), no al lienzo: un sprite pequeno en un lienzo transparente
+        // grande tenia todos los frames "casi iguales" y se quedaba sin objetos
+        double contentArea = 1; for (int i = 0; i < N; ++i) contentArea = std::max(contentArea, double(lay::opaqueCount(orig[size_t(i)], thr)));
+        const double thrArea = double(std::clamp(lo.reuse, 0.f, 0.2f)) * contentArea;
         for (int i = 0; i < N; ++i) {
             int bestJ = -1; double bestA = thrArea;
             if (thrArea > 0) {
