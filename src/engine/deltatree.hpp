@@ -45,6 +45,7 @@ struct Sched {
     std::vector<int> initHide;                            // capas que no se ven en el frame 0
     std::vector<int> layerOf;                             // frame -> su propia capa (el mismo indice) o -1 si la delta esta vacia
     int nLayers = 0, nSteps = 0, groups = 0, triggers = 0;
+    bool full = false;                                    // cada paso fija el estado COMPLETO (ver kFullStateMaxLayers en layered.hpp)
 };
 
 inline Sched schedule(const LayeredAnim& a) {
@@ -79,8 +80,10 @@ inline Sched schedule(const LayeredAnim& a) {
     }
     s.initHide = diff([&] { std::vector<int> all; for (int i = 0; i < N; ++i) if (s.layerOf[size_t(i)] >= 0) all.push_back(i); return all; }(), s.path[0]);
     const bool hasI = !s.initHide.empty();
+    s.full = s.nLayers <= kFullStateMaxLayers;
+    if (s.full) acts = s.nSteps * s.nLayers;                                 // cota: una Alpha por capa y paso
     s.groups = s.nLayers + s.nSteps + 1 + (hasI ? 1 : 0);
-    s.triggers = s.nSteps + 1 + acts + int(s.initHide.size()) + 1 + (hasI ? 2 : 0) + int(a.palette.size());
+    s.triggers = s.nSteps + (s.full ? s.nSteps : 0) + 1 + acts + int(s.initHide.size()) + 1 + (hasI ? 2 : 0) + int(a.palette.size());
     return s;
 }
 
@@ -328,15 +331,26 @@ inline std::string buildTreeString(const LayeredAnim& a, const GifPlan& plan, co
     auto posA = [&](double& x, double& y) { board.atAlpha(x, y); };
     auto posS = [&](double& x, double& y) { board.atSpawn(x, y); };
     double x, y, t = 0;
+    std::vector<double> tStart(size_t(N), 0.0);
     for (int i = 0; i < N; ++i) {                               // bucle L
+        tStart[size_t(i)] = t;
         if (gStep[size_t(i)] > 0) { posS(x, y); detail::addSpawn(out, p, x, y, gStep[size_t(i)], t, L); }
         t += plan.delay[size_t(i)];
     }
+    if (S.full)                                                 // segunda ejecucion (idempotente) de cada paso
+        for (int i = 0; i < N; ++i)
+            if (gStep[size_t(i)] > 0) { posS(x, y); detail::addSpawn(out, p, x, y, gStep[size_t(i)], tStart[size_t(i)] + reassertDelay(plan.delay[size_t(i)]), L); }
     posS(x, y); detail::addSpawn(out, p, x, y, L, plan.total, L);
     if (hasI) { posS(x, y); detail::addSpawn(out, p, x, y, I, 0, L); }     // autocorreccion en cada vuelta
     board.newBlock();
-    for (int i = 0; i < N; ++i) {                               // pasos: ocultar lo que sale del camino, mostrar lo que entra
+    for (int i = 0; i < N; ++i) {                               // pasos
         const int F = gStep[size_t(i)]; if (F <= 0) continue;
+        if (S.full) {                                           // estado completo: mostrar el camino raiz -> frame y ocultar TODAS las demas capas
+            std::set<int> vis(S.path[size_t(i)].begin(), S.path[size_t(i)].end());
+            for (int l : S.path[size_t(i)]) { posA(x, y); detail::addAlpha(out, p, x, y, gLayer[size_t(l)], 1, F); }
+            for (int l = 0; l < N; ++l) if (S.layerOf[size_t(l)] >= 0 && !vis.count(l)) { posA(x, y); detail::addAlpha(out, p, x, y, gLayer[size_t(l)], 0, F); }
+            continue;
+        }
         for (int l : S.hide[size_t(i)]) { posA(x, y); detail::addAlpha(out, p, x, y, gLayer[size_t(l)], 0, F); }
         for (int l : S.show[size_t(i)]) { posA(x, y); detail::addAlpha(out, p, x, y, gLayer[size_t(l)], 1, F); }
     }

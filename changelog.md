@@ -1,3 +1,18 @@
+# v0.5.4-beta
+- **Triggers autocorregibles (todos los metodos 1-19)**. Analisis de tus dos videos (1-17 y 18-19, mismo GIF de 17 frames, bucle de ~1,29 s):
+  - 1-17: en CADA vuelta hay exactamente 1 hueco totalmente vacio de la duracion de un frame, siempre en la misma posicion, y el salto de pose a traves del hueco es ~1,5-2 veces
+    el normal: el hueco **sustituye a un frame** (no es una pausa extra del bucle). Es decir: en ese paso se oculto el frame anterior pero no se mostro el nuevo.
+  - 18-19: faltan las orejas y quedan trozos de capas encimados/estaticos = una capa que no se oculto/mostro a tiempo.
+  Mi modelo de GD no reproduce el fallo con triggers perfectos (lo que ya sabiamos), pero con un trigger perdido o fuera de orden el diseno anterior da EXACTAMENTE esos sintomas
+  (nuevo `tests/robust_test.cpp`: 3 % de Alpha perdidos -> 2,5 % de muestras vacias en 1-17 y 7-9 % de capas mezcladas en 18/19; lag + 2 % perdidos -> 20 % mezcladas).
+  Cambio: cada paso F_i ahora fija el estado COMPLETO (idempotente): muestra su frame/capas y oculta TODO lo demas (hasta 12 frames / 40 capas; con mas frames oculta los 5 anteriores)
+  y **se ejecuta dos veces** (en t_i y 20 ms despues, nunca mas tarde que el 40 % del frame). Con el mismo modelo hostil: 0 % de fallos en 1-17 y 0-0,3 % en 18/19.
+  Coste: mas triggers (p. ej. 16 frames: de 67 a 147 en 1-17, de ~76 a ~358 en 18). El presupuesto de objetos ya los descuenta.
+- **Frame vacio = hueco**: si un frame sale con 0 objetos (excepcion al convertirlo, frame transparente...) ahora se repite el ultimo frame valido en vez de dejar la animacion vacia.
+- **Colocacion**: se cuenta cuantos objetos crea GD en cada tanda; si crea menos de los pedidos el aviso final lo dice (antes fallaba en silencio).
+- Nuevo modelo de fallos en `tests/gdsim.hpp` (lag con orden inverso, Alpha/Spawn perdidos) y `tests/robust_test.cpp`.
+- NO verificado: la causa exacta en GD real (por que se pierde ese trigger). Si sigue pasando, ver README "NO verificado".
+
 # v0.5.3-beta
 - **Decodificador de GIF propio** (`src/engine/gifdecode.hpp`). stb_image componia MAL los GIF con "disposal 3" (restaurar al frame anterior) y el error se acumula frame a frame:
   restos de otros frames y "estatica" en los ultimos frames. El nuevo sigue la especificacion (disposal 0-3, transparencia, tablas locales/globales, entrelazado, subrectangulos),

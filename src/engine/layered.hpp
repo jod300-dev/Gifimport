@@ -806,7 +806,13 @@ struct LayeredSchedule {
     std::vector<int> initHidePatch, initHideRest;
     int nRests = 0, nPatches = 0, nSteps = 0;
     int groups = 0, triggers = 0;
+    bool full = false;                  // cada paso fija el estado COMPLETO de todas las capas (ver kFullStateMaxLayers)
 };
+
+// Autocorreccion (igual que en los frames planos, ver gifanim.hpp): con pocas capas, cada paso F_i muestra las capas que toca y OCULTA todas
+// las demas (idempotente) y se lanza dos veces (en t_i y unos ms despues). Un trigger perdido / fuera de orden ya no deja una capa
+// colgada (los "restos estaticos" encima de otros frames) ni un frame sin su parche. Con mas capas se mantiene el esquema de diferencias.
+constexpr int kFullStateMaxLayers = 40;
 
 inline LayeredSchedule scheduleLayered(const LayeredAnim& a) {
     LayeredSchedule s;
@@ -832,8 +838,10 @@ inline LayeredSchedule scheduleLayered(const LayeredAnim& a) {
     for (int k = 0; k < K; ++k) if (s.restLayer[size_t(k)] >= 0 && s.restLayer[size_t(k)] != r0) s.initHideRest.push_back(k);
     const bool hasI = !s.initHidePatch.empty() || !s.initHideRest.empty();
     int acts = 0; for (auto& st : s.step) acts += st.actions();
+    s.full = (s.nRests + s.nPatches) <= kFullStateMaxLayers;
+    if (s.full) acts = s.nSteps * (s.nRests + s.nPatches);                    // cota: una Alpha por capa y paso
     s.groups = s.nRests + s.nPatches + s.nSteps + 1 + (hasI ? 1 : 0);
-    s.triggers = s.nSteps + 1 + acts + int(s.initHidePatch.size() + s.initHideRest.size()) + 1 + (hasI ? 1 : 0) + (hasI ? 1 : 0) + int(a.palette.size());     // + Spawn(I) por vuelta + un Color trigger por canal
+    s.triggers = s.nSteps + (s.full ? s.nSteps : 0) + 1 + acts + int(s.initHidePatch.size() + s.initHideRest.size()) + 1 + (hasI ? 1 : 0) + (hasI ? 1 : 0) + int(a.palette.size());     // Spawn(F) (x2 si full) + Spawn(L) + Spawn(I) por vuelta + un Color trigger por canal
     return s;
 }
 
@@ -908,10 +916,15 @@ inline std::string buildLayeredString(const LayeredAnim& a, const GifPlan& plan,
     double x, y;
 
     double t = 0;                                              // bucle L
+    std::vector<double> tStart(size_t(N), 0.0);
     for (int i = 0; i < N; ++i) {
+        tStart[size_t(i)] = t;
         if (gStep[size_t(i)] > 0) { posS(x, y); detail::addSpawn(out, p, x, y, gStep[size_t(i)], t, L); }
         t += plan.delay[size_t(i)];
     }
+    if (S.full)                                                // segunda ejecucion (idempotente) de cada paso
+        for (int i = 0; i < N; ++i)
+            if (gStep[size_t(i)] > 0) { posS(x, y); detail::addSpawn(out, p, x, y, gStep[size_t(i)], tStart[size_t(i)] + reassertDelay(plan.delay[size_t(i)]), L); }
     posS(x, y); detail::addSpawn(out, p, x, y, L, plan.total, L);
     if (hasI) { posS(x, y); detail::addSpawn(out, p, x, y, I, 0, L); }     // autocorreccion en cada vuelta
     board.newBlock();
@@ -920,6 +933,15 @@ inline std::string buildLayeredString(const LayeredAnim& a, const GifPlan& plan,
         const LayerStep& st = S.step[size_t(i)];
         const int F = gStep[size_t(i)];
         if (F <= 0) continue;
+        if (S.full) {                                          // estado completo: mostrar lo que toca y ocultar TODO lo demas
+            const int curP = S.patchLayer[size_t(i)];
+            const int curR = a.restOf[size_t(i)] >= 0 ? S.restLayer[size_t(a.restOf[size_t(i)])] : -1;
+            if (curP >= 0) { posA(x, y); detail::addAlpha(out, p, x, y, gPatch[size_t(curP)], 1, F); }
+            if (curR >= 0) { posA(x, y); detail::addAlpha(out, p, x, y, gRest[size_t(curR)], 1, F); }
+            for (int j = 0; j < N; ++j) if (S.patchLayer[size_t(j)] == j && j != curP) { posA(x, y); detail::addAlpha(out, p, x, y, gPatch[size_t(j)], 0, F); }
+            for (int k = 0; k < K; ++k) if (S.restLayer[size_t(k)] >= 0 && k != curR) { posA(x, y); detail::addAlpha(out, p, x, y, gRest[size_t(k)], 0, F); }
+            continue;
+        }
         if (st.hidePatch >= 0) { posA(x, y); detail::addAlpha(out, p, x, y, gPatch[size_t(st.hidePatch)], 0, F); }
         if (st.showPatch >= 0) { posA(x, y); detail::addAlpha(out, p, x, y, gPatch[size_t(st.showPatch)], 1, F); }
         if (st.hideRest >= 0)  { posA(x, y); detail::addAlpha(out, p, x, y, gRest[size_t(st.hideRest)], 0, F); }

@@ -1,5 +1,6 @@
 // Simulador de GD (modelo): parsea la cadena exportada, aplica HSV/canales/Color triggers/Alpha/Spawn y rasteriza con z-order.
 #pragma once
+#include <algorithm>
 #include <map>
 #include <queue>
 #include <random>
@@ -32,7 +33,12 @@ inline void hsv2rgb(double h, double s, double v, double& r, double& g, double& 
     else if (h < 240) { gg = x; bb = c; } else if (h < 300) { rr = x; bb = c; } else { rr = c; bb = x; }
     r = rr + m; g = gg + m; b = bb + m;
 }
-struct Opt { bool randomTies = false; bool shuffleSameTick = false; unsigned seed = 1; };
+// Modelos de FALLO para probar la robustez de los triggers (GD real no siempre ejecuta todo en orden y a tiempo):
+//   tick > 0 : el juego avanza a saltos de `tick` segundos (lag); todos los eventos de un salto se ejecutan juntos y, con reverseTick,
+//              en orden INVERSO de tiempo (peor caso: F_(k+1) antes que F_k).
+//   dropAlpha / dropSpawn : probabilidad de que un Alpha / Spawn spawn-triggered NO se ejecute (se pierde).
+struct Opt { bool randomTies = false; bool shuffleSameTick = false; unsigned seed = 1;
+             double tick = 0; bool reverseTick = false; double dropAlpha = 0, dropSpawn = 0; };
 struct Sim {
     std::vector<Obj> objs;
     std::map<int, std::array<uint8_t,3>> chColor;       // canal -> color (de Color triggers)
@@ -75,21 +81,32 @@ struct Sim {
     }
     // Procesa todos los eventos con t <= tUntil.  Los eventos del mismo instante se ejecutan por orden de x (izq -> der) o barajados.
     void run(double tUntil, const Opt& opt, std::mt19937& rng) {
+        std::uniform_real_distribution<double> U(0.0, 1.0);
         while (!q.empty() && q.top().t <= tUntil + 1e-9) {
             double t = q.top().t; std::vector<Ev> batch;
-            while (!q.empty() && std::abs(q.top().t - t) < 1e-9) { batch.push_back(q.top()); q.pop(); }
+            if (opt.tick > 0) {                                       // un salto de lag: todo lo que vence dentro del tick
+                const double tk = (std::floor(t / opt.tick + 1e-9) + 1.0) * opt.tick;
+                while (!q.empty() && q.top().t < tk - 1e-12 && q.top().t <= tUntil + 1e-9) { batch.push_back(q.top()); q.pop(); }
+                if (opt.reverseTick) std::stable_sort(batch.begin(), batch.end(), [&](const Ev& a, const Ev& b) { return a.t > b.t; });
+            } else while (!q.empty() && std::abs(q.top().t - t) < 1e-9) { batch.push_back(q.top()); q.pop(); }
             // una "ronda" del mismo instante: lo que dispare un spawn con retardo 0 entra en la misma ronda
             while (!batch.empty()) {
-                if (opt.shuffleSameTick) std::shuffle(batch.begin(), batch.end(), rng);
+                if (opt.tick > 0) { /* se respeta el orden del salto */ }
+                else if (opt.shuffleSameTick) std::shuffle(batch.begin(), batch.end(), rng);
                 else std::stable_sort(batch.begin(), batch.end(), [&](const Ev& a, const Ev& b) { return objs[size_t(a.obj)].x < objs[size_t(b.obj)].x; });
                 std::vector<Ev> next;
                 for (const Ev& e : batch) {
                     const Obj& ob = objs[size_t(e.obj)];
                     int target = int(ob.geti(51));
-                    if (ob.id == 1007) opacity[target] = int(ob.geti(35, 1));
-                    else if (ob.id == 1268) {
+                    const bool spawnTriggered = ob.has(62);
+                    if (ob.id == 1007) {
+                        if (spawnTriggered && opt.dropAlpha > 0 && U(rng) < opt.dropAlpha) continue;     // este Alpha se pierde
+                        opacity[target] = int(ob.geti(35, 1));
+                    } else if (ob.id == 1268) {
+                        const bool selfLoop = std::find(ob.groups.begin(), ob.groups.end(), target) != ob.groups.end();   // Spawn(L, total): no se pierde
+                        if (spawnTriggered && !selfLoop && opt.dropSpawn > 0 && U(rng) < opt.dropSpawn) continue;
                         double d = ob.geti(63, 0);
-                        for (int ti : trigsIn[target]) { if (d <= 1e-9) next.push_back({t, seq++, ti}); else q.push({t + d, seq++, ti}); }
+                        for (int ti : trigsIn[target]) { if (d <= 1e-9) next.push_back({e.t, seq++, ti}); else q.push({e.t + d, seq++, ti}); }
                     }
                 }
                 batch = std::move(next);

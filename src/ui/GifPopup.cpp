@@ -69,7 +69,7 @@ namespace {
     class PlaceRunner : public CCNode {
     public:
         std::vector<std::string> parts;
-        size_t next = 0, placed = 0, totalObjs = 0;
+        size_t next = 0, placed = 0, expected = 0, totalObjs = 0;
         bool selectAfter = false;
         std::string doneMsg;
         Ref<CCLabelBMFont> label;                                   // progreso (propio, sin depender de la API de Notification)
@@ -105,6 +105,11 @@ namespace {
             auto t0 = std::chrono::steady_clock::now();
             do {
                 if (next >= parts.size()) break;
+                {   // objetos que ESTA tanda deberia crear (segmentos separados por ';'): si GD crea menos se avisa al final
+                    size_t segs = parts[next].empty() ? 0 : 1;
+                    for (char ch : parts[next]) if (ch == ';') ++segs;
+                    expected += segs;
+                }
                 CCArray* made = lel->createObjectsFromString(parts[next].c_str(), true, true);
                 if (made) {
                     placed += made->count();
@@ -125,8 +130,13 @@ namespace {
                 if (auto* ed = EditorUI::get()) ed->selectObjects(selected, true);
             }
             if (label && label->getParent()) label->removeFromParent();
-            Notification::create(ok ? doneMsg : std::string("Colocacion cancelada (se salio del editor)"),
-                                 ok ? NotificationIcon::Success : NotificationIcon::Error, 3.5f)->show();
+            std::string msg = ok ? doneMsg : std::string("Colocacion cancelada (se salio del editor)");
+            bool warn = false;
+            if (ok && placed < expected) {                       // GD no creo todo lo que se le pidio: la animacion saldria con huecos
+                msg += " | AVISO: GD creo " + std::to_string(placed) + " de " + std::to_string(expected) + " objetos";
+                warn = true;
+            }
+            Notification::create(msg, ok && !warn ? NotificationIcon::Success : NotificationIcon::Error, warn ? 8.f : 3.5f)->show();
             this->removeFromParent();
         }
     };

@@ -73,7 +73,7 @@ Analisis de lo visto en el juego (preview limpio, pero astillas / frames "amalga
 Notas: la calidad sube de forma continua con el presupuesto (medido de 500 a 4000 objetos/frame en todos los metodos): no hay valores "buenos" y "malos". Con *Lado largo* pequeno (p. ej. 210 u) los objetos miden <1 unidad: sube el lado largo si se ve borroso.
 
 | Orden arbitrario entre formas con el mismo z | En GD las formas con el mismo z-order NO tienen orden garantizado (depende de como entran a pantalla). La compactacion anterior detectaba solapes por centros de pixel y dejaba 39-90 pares por frame (trazos finos) empatados | `compactZ` usa solape **geometrico exacto (SAT)**: ningun par solapado comparte z (0 empates; la prueba lo exige y falla con el codigo anterior). |
-| Frames superpuestos si un trigger falla una vez | Un `hide` perdido deja dos frames visibles hasta el final | En cada vuelta el bucle vuelve a ejecutar el grupo de inicio (oculta todo salvo el frame 0): se autocorrige (+1 trigger). |
+| Frames superpuestos / frame vacio si un trigger falla una vez | Un `hide` perdido deja dos frames visibles; un `show` perdido deja un hueco vacio | v0.5.4: cada paso F_i fija el estado completo (muestra el suyo, oculta los demas) y se lanza dos veces (t_i y +20 ms); ademas el grupo de inicio I se repite en cada vuelta. `tests/robust_test.cpp` lo comprueba con lag y triggers perdidos. |
 | No saber si el fallo es de la conversion o de los triggers | — | Ajuste **Modo al colocar**: *Hoja de frames* (todos los frames lado a lado, objetos estaticos, sin triggers) o *Solo el frame 0*. |
 
 Los triggers de arranque estan por defecto en x = -30: solo se ejecutan si juegas **desde el inicio del nivel**. Si pruebas con *Playtest desde la posicion del editor* o un Start Pos mas a la derecha, desactiva *Triggers de arranque en el inicio* para que queden junto a la imagen.
@@ -116,7 +116,7 @@ Es un **modelo** (no GD real): lo que no puede comprobar esta en "NO verificado"
 
 ## NO verificado (importante)
 * **"Estatica" en los ultimos frames / ultimo frame que desaparece / bucle entrecortado (modos 7 y 8).** El decodificador de GIF anterior (stb) comparte un fallo demostrado con disposal 3, y es la
-  causa mas probable si tu GIF lo usa, pero NO he podido comprobarlo con tu GIF concreto. Si sigue pasando con la v0.5.3, usa "Patron de calibracion" y juega el nivel: si los 12 colores salen
+  causa mas probable si tu GIF lo usa, pero NO he podido comprobarlo con tu GIF concreto. Si sigue pasando con la v0.5.4, usa "Patron de calibracion" y juega el nivel: si los 12 colores salen
   limpios, el bucle/triggers estan bien y el problema esta en los datos de ese GIF; si salen mezclados, es un problema de triggers/orden en GD y hace falta saber en que frame ocurre.
 
 * **Frames "amalgamados" con muchos frames (>15-20) en el metodo plano.** No he podido reproducirlo: con tus Unnamed_10/11 mi modelo de GD da imagenes limpias, pero tu captura del plano

@@ -232,7 +232,7 @@ int main(int argc, char** argv) {
             auto cl = buildCalibration(eo, -30, 777);
             if (triggerOverlaps(cl.str)) fail("calibracion+bucle: triggers que se pisan");
             int alphas = 0, groups = 0; for (auto& kv : parse(cl.str)) { if (!kv.count(1)) continue; int id = std::stoi(kv.at(1)); if (id == 1007) ++alphas; if (id == 3092 && kv.count(57)) ++groups; }
-            if (alphas != 2 * 12 + 11 || groups < 12 * 3) fail("calibracion+bucle: esperaba 35 Alpha y 36 objetos con grupo, hay " + std::to_string(alphas) + "/" + std::to_string(groups));
+            if (alphas != 12 * (1 + hidesPerFrame(12)) + 11 || groups < 12 * 3) fail("calibracion+bucle: esperaba 155 Alpha (frames completos: 12 x 12 + 11) y 36 objetos con grupo, hay " + std::to_string(alphas) + "/" + std::to_string(groups));
             ++checks;
         }
         auto cr = buildCalibration(eo, -30);

@@ -179,9 +179,37 @@ inline std::vector<int> frameBands(const std::vector<Result>& results, int zBase
 }
 } // namespace detail
 
-constexpr int kGifTriggersPerFrame = 4;
-inline int gifTriggerCount(int frames) { return kGifTriggersPerFrame * frames + 3; }   // +1: Spawn(I) en cada vuelta
+// ---- Autocorreccion de los frames planos (metodos 1-17) ----------------------------------------------------------------------
+// Antes cada F_i hacia solo "mostrar G_i + ocultar G_(i-1)". Si en GD UN solo trigger se pierde, llega fuera de orden (varios Spawn
+// que vencen en el mismo tick tras un tiron/lag) o se pisa con otro, el resultado era un frame VACIO (se oculto el anterior pero no
+// se mostro el nuevo) o un frame que se quedaba ENCIMA de los demas (no se oculto; los frames de indice menor tienen mas z).
+// Ahora cada F_i fija el estado COMPLETO y es idempotente: muestra G_i y oculta TODOS los demas (N <= 12) o los 5 anteriores (N > 12), y
+// cada F_i se lanza DOS veces (en t_i y unos ms despues): si la primera ejecucion falla, la segunda lo deja bien antes del siguiente frame.
+constexpr int kFullStateMaxFrames = 12;     // hasta aqui: oculta todos los demas frames en cada paso
+constexpr int kHideWindow = 5;              // mas frames: oculta los 5 anteriores
+constexpr double kReassertDelay = 0.02;     // la segunda ejecucion de F_i llega 20 ms (o el 40 % del frame si es mas corto) despues
+inline int hidesPerFrame(int frames) { return frames <= kFullStateMaxFrames ? std::max(1, frames - 1) : std::min(frames - 1, kHideWindow); }
+inline double reassertDelay(double frameDelay) { return std::max(0.005, std::min(kReassertDelay, frameDelay * 0.4)); }
+// Triggers: Spawn (F_i x2) + Spawn(L) + Spawn(I) + F_i (1 mostrar + H ocultar) + I (N-1) + 2 de arranque. Es una COTA (si hay frames vacios hay menos).
+inline int gifTriggerCount(int frames) { return frames * (4 + hidesPerFrame(frames)) + 3; }
 inline int gifGroupCount(int frames) { return 2 * frames + 2; }
+
+namespace detail {
+// Frame vacio (0 objetos: p. ej. una excepcion al convertirlo o un frame transparente): en vez de dejar un HUECO en la animacion
+// muestra el ultimo frame que si tiene objetos (o el primero si es el principio).  src[i] = frame cuyo grupo se muestra en el paso i.
+inline std::vector<int> frameSources(const std::vector<Result>& results) {
+    const int n = int(results.size());
+    std::vector<int> src(size_t(n), -1);
+    int lastOk = -1;
+    for (int i = 0; i < n; ++i) { if (!results[size_t(i)].shapes.empty()) lastOk = i; src[size_t(i)] = lastOk; }
+    int firstOk = -1; for (int i = 0; i < n; ++i) if (!results[size_t(i)].shapes.empty()) { firstOk = i; break; }
+    for (int i = 0; i < n && src[size_t(i)] < 0; ++i) src[size_t(i)] = firstOk;
+    return src;
+}
+inline int emptyFrameCount(const std::vector<Result>& results) {
+    int c = 0; for (auto& r : results) if (r.shapes.empty()) ++c; return c;
+}
+} // namespace detail
 
 // Objetos por frame que caben respetando el tope total (triggers incluidos).
 inline int gifPerFrameBudget(int requested, int frames, int maxTotal, int extraObjects = 0) {
@@ -253,6 +281,49 @@ inline void addSpawn(std::string& s, const GifExportParams& p, double x, double 
 }
 } // namespace detail
 
+namespace detail {
+// Triggers de los frames planos (compartido por buildGifString y buildGifStringCh).  Grupos: G0+i frame i, F0+i paso i, L bucle, I inicio.
+//   L : Spawn(F_i, t_i) + Spawn(F_i, t_i + d) [segunda ejecucion] + Spawn(L, total) + Spawn(I, 0)
+//   F_i: Alpha(G_src(i), 1) y luego Alpha(G_j, 0) para los demas frames (ver hidesPerFrame); nunca se oculta y muestra el mismo grupo.
+//   I : Alpha(G_j, 0) para todos los frames distintos del grupo del frame 0.
+inline void emitFlatTriggers(std::string& out, const GifExportParams& p, const GifPlan& plan, TrigBoard& board,
+                             int G0, int F0, int L, int I, const std::vector<int>& src) {
+    const int N = plan.count();
+    const int H = hidesPerFrame(N);
+    double x, y, t = 0;
+    std::vector<double> start(size_t(N), 0.0);
+    for (int i = 0; i < N; ++i) { board.atSpawn(x, y); addSpawn(out, p, x, y, F0 + i, t, L); start[size_t(i)] = t; t += plan.delay[size_t(i)]; }
+    for (int i = 0; i < N; ++i) {                                              // segunda ejecucion (idempotente) de cada paso
+        board.atSpawn(x, y);
+        addSpawn(out, p, x, y, F0 + i, start[size_t(i)] + reassertDelay(plan.delay[size_t(i)]), L);
+    }
+    board.atSpawn(x, y); addSpawn(out, p, x, y, L, plan.total, L);
+    board.atSpawn(x, y); addSpawn(out, p, x, y, I, 0, L);                      // autocorreccion en cada vuelta
+    board.newBlock();
+
+    for (int i = 0; i < N; ++i) {
+        std::set<int> done; done.insert(src[size_t(i)]);
+        board.atAlpha(x, y); addAlpha(out, p, x, y, G0 + src[size_t(i)], 1, F0 + i);       // primero MOSTRAR el frame nuevo
+        for (int k = 1; k <= H; ++k) {
+            // todos los demas (en orden de cercania al frame actual hacia atras) o los H anteriores
+            const int j = ((i - k) % N + N) % N;
+            const int s = src[size_t(j)];
+            if (!done.insert(s).second) continue;
+            board.atAlpha(x, y); addAlpha(out, p, x, y, G0 + s, 0, F0 + i);
+        }
+    }
+    board.newBlock();
+    {
+        std::set<int> done; done.insert(src[0]);
+        for (int i = 1; i < N; ++i) {
+            if (!done.insert(src[size_t(i)]).second) continue;
+            board.atAlpha(x, y); addAlpha(out, p, x, y, G0 + src[size_t(i)], 0, I);
+        }
+    }
+    board.newBlock();
+}
+} // namespace detail
+
 // results = un Result por frame del plan. Devuelve "" si algo no cuadra (errmsg explica).
 inline std::string buildGifString(const std::vector<Result>& results, const GifPlan& plan,
                                   const GifExportParams& p, std::string* errmsg = nullptr) {
@@ -288,38 +359,11 @@ inline std::string buildGifString(const std::vector<Result>& results, const GifP
 
     // --- triggers (se mueven al principio de la cadena al final: ver triggersFirst)
     const size_t objEnd = out.size();
-    const Result& r0 = results[0];
+    const std::vector<int> src = detail::frameSources(results);          // frames vacios: se repite el anterior (sin hueco)
+    const Result& r0 = results[size_t(src[0])];
     GdSize sz = gdImageSize(r0, p.eo);
     detail::TrigBoard board(detail::rowLeft(p.eo.originX - sz.w * 0.5, p.trigX), p.eo.originY + sz.h * 0.5 + 90.0);
-    auto posA = [&](double& x, double& y) { board.atAlpha(x, y); };
-    auto posS = [&](double& x, double& y) { board.atSpawn(x, y); };
-    double x, y;
-
-    // bucle L: Spawn(F_i, t_i) + Spawn(L, total)
-    double t = 0;
-    for (int i = 0; i < N; ++i) {
-        posS(x, y);
-        detail::addSpawn(out, p, x, y, F0 + i, t, L);
-        t += plan.delay[size_t(i)];
-    }
-    posS(x, y);
-    detail::addSpawn(out, p, x, y, L, plan.total, L);
-    // Autocorreccion: en cada vuelta se vuelve a ocultar todo salvo el frame 0, asi un trigger fallido no deja frames superpuestos.
-    posS(x, y);
-    detail::addSpawn(out, p, x, y, I, 0, L);
-    board.newBlock();
-
-    // F_i: mostrar G_i, ocultar el frame anterior
-    for (int i = 0; i < N; ++i) {
-        posA(x, y); detail::addAlpha(out, p, x, y, G0 + i, 1, F0 + i);
-        posA(x, y); detail::addAlpha(out, p, x, y, G0 + (i + N - 1) % N, 0, F0 + i);
-    }
-    board.newBlock();
-    // I: ocultar los frames 1..N-1 al empezar
-    for (int i = 1; i < N; ++i) {
-        posA(x, y); detail::addAlpha(out, p, x, y, G0 + i, 0, I);
-    }
-    board.newBlock();
+    detail::emitFlatTriggers(out, p, plan, board, G0, F0, L, I, src);
     // arranque (triggers de posicion): lanzan L e I
     double sx = p.trigX, sy = board.nextY();
     detail::addSpawn(out, p, sx, board.rowY(), L, 0, 0);          // arranque: lanza L

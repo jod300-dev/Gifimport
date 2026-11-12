@@ -84,23 +84,11 @@ inline std::string buildGifStringCh(const std::vector<Result>& results, const Gi
         out += s; out += ';';
     }
     const size_t objEnd = out.size();
-    const Result& r0 = results[0];
+    const std::vector<int> src = detail::frameSources(results);          // frames vacios: se repite el anterior (sin hueco)
+    const Result& r0 = results[size_t(src[0])];
     GdSize sz = gdImageSize(r0, p.eo);
     detail::TrigBoard board(detail::rowLeft(p.eo.originX - sz.w * 0.5, p.trigX), p.eo.originY + sz.h * 0.5 + 90.0);
-    auto posA = [&](double& x, double& y) { board.atAlpha(x, y); };
-    auto posS = [&](double& x, double& y) { board.atSpawn(x, y); };
-    double x, y, t = 0;
-    for (int i = 0; i < N; ++i) { posS(x, y); detail::addSpawn(out, p, x, y, F0 + i, t, L); t += plan.delay[size_t(i)]; }
-    posS(x, y); detail::addSpawn(out, p, x, y, L, plan.total, L);
-    posS(x, y); detail::addSpawn(out, p, x, y, I, 0, L);                 // autocorreccion en cada vuelta
-    board.newBlock();
-    for (int i = 0; i < N; ++i) {
-        posA(x, y); detail::addAlpha(out, p, x, y, G0 + i, 1, F0 + i);
-        posA(x, y); detail::addAlpha(out, p, x, y, G0 + (i + N - 1) % N, 0, F0 + i);
-    }
-    board.newBlock();
-    for (int i = 1; i < N; ++i) { posA(x, y); detail::addAlpha(out, p, x, y, G0 + i, 0, I); }
-    board.newBlock();
+    detail::emitFlatTriggers(out, p, plan, board, G0, F0, L, I, src);
     double sx = p.trigX, sy = board.nextY();
     detail::addSpawn(out, p, sx, board.rowY(), L, 0, 0);          // arranque: lanza L
     detail::addSpawn(out, p, sx, board.rowY() + 30.0, I, 0, 0);   // y lanza I, justo ENCIMA (los dos de arranque van apilados)
