@@ -8,7 +8,7 @@
 	},
 	"id": "patasma.gif_importer",
 	"name": "GIF Importer",
-	"version": "v0.5.6-beta",
+	"version": "v0.5.7-beta",
 	"developer": "Patasma",
 	"description": "Importa GIFs animados al editor usando Alpha triggers + Spawn triggers en bucle infinito. Eliges objetos por frame y metodo de imagen (17 metodos + 18 por capas + 19 arbol de deltas + 20-29 capas LSA). BETA.",
 	"resources": {
@@ -182,6 +182,16 @@
 			"max": 1020,
 			"name": "Canal blanco",
 			"description": "Canal del papel blanco en los estilos de tinta (1011 = blanco). Si el papel no sale blanco, cambia este valor."
+		},
+		"title-diag": {
+			"name": "Diagnostico",
+			"type": "title"
+		},
+		"save-report": {
+			"type": "bool",
+			"default": false,
+			"name": "Guardar informe de diagnostico al colocar",
+			"description": "Cada vez que coloques un GIF se guarda, en la carpeta del mod <cy>diagnostics/</c>, un informe completo: <cy>informe.txt</c> (ajustes, GIF, plan de frames, estructura del metodo, estadisticas y comprobaciones automaticas), <cy>cadena.txt</c> (la cadena exacta de GD), <cy>objetos.tsv</c> y <cy>triggers.tsv</c> (posiciones y datos de cada objeto/trigger) y dos imagenes de comparacion (GIF original / lo que calculo el mod / diferencia). Se conservan los 8 mas recientes. Mandame esa carpeta cuando algo salga mal."
 		},
 		"title-layered": {
 			"name": "Capas (metodo 18)",

@@ -6,6 +6,11 @@
 #include <Geode/utils/async.hpp>
 #include <thread>
 #include <chrono>
+#include <ctime>
+#include <sstream>
+#include <filesystem>
+#include <fstream>
+#include "diag.hpp"
 
 namespace {
     constexpr float kPopupW = 430.f, kPopupH = 290.f;
@@ -742,6 +747,7 @@ void GifPopup::onPlace(CCObject*) {
         if (m_layered && m_layered->ok() && m_layeredKey == layeredKey()) {
             job->layered = m_layered;                           // ya calculado por la vista previa: se coloca directo
             job->plan = m_layeredPlan;
+            job->reused = true;
             job->done.store(true, std::memory_order_release);
             m_build = job;
             return;
@@ -781,6 +787,83 @@ void GifPopup::onPlace(CCObject*) {
         }
         job->done.store(true, std::memory_order_release);
     }).detach();
+}
+
+
+// Ajuste "save-report": guarda en <carpeta del mod>/diagnostics/<fecha>_m<metodo>/ el informe, la cadena de GD, las tablas de objetos y triggers y las imagenes
+// de comparacion (ver engine/diag.hpp). Nunca debe romper la colocacion: cualquier fallo se ignora.
+void GifPopup::saveDiagnostics(std::shared_ptr<BuildJob> const& job, gdx::GifExportParams const& p, std::string const& chain, std::string const& note) {
+    auto* mod = Mod::get();
+    if (!mod->getSettingValue<bool>("save-report") || !job || !job->gif || chain.empty()) return;
+    try {
+        std::vector<gdx::Result> frames;
+        if (job->layered && job->layered->ok()) {
+            for (int f = 0; f < job->layered->frames; ++f) frames.push_back(gdx::animFrameResult(*job->layered, f));
+        } else {
+            frames = job->results;
+        }
+        std::ostringstream st;
+        st << "[ajustes del mod]\n";
+        for (const char* k : {"max-total-objects", "first-group", "threads", "max-raster", "alpha-threshold", "color-channel", "black-channel", "white-channel", "layered-tolerance", "layered-palette-size"})
+            st << k << " = " << mod->getSettingValue<int>(k) << "\n";
+        for (const char* k : {"speed", "min-delay", "bleed", "layered-reuse"}) st << k << " = " << mod->getSettingValue<double>(k) << "\n";
+        for (const char* k : {"triggers-at-start", "flip-rotation", "select-after", "invert-ink", "layered-rotated", "layered-denoise", "save-report"})
+            st << k << " = " << (mod->getSettingValue<bool>(k) ? "true" : "false") << "\n";
+        for (const char* k : {"place-mode", "quality", "compute-effort"}) st << k << " = " << mod->getSettingValue<std::string>(k) << "\n";
+        st << "[ventana]\nindice de metodo = " << m_method << " (metodo " << (m_method + 1) << ")\nobjetos por frame = " << m_perFrame << "\nlado largo (u) = " << m_sizeU
+           << "\nframes maximos = " << m_maxFrames << "\ngris = " << m_gray << "\ncanales = " << m_chan << "\ntamano de paleta = " << paletteSize() << "\n";
+
+        const std::time_t now = std::time(nullptr); std::tm lt{};
+#ifdef _WIN32
+        localtime_s(&lt, &now);
+#else
+        localtime_r(&now, &lt);
+#endif
+        char stamp[32]; std::strftime(stamp, sizeof stamp, "%Y%m%d_%H%M%S", &lt);
+        char when[48]; std::strftime(when, sizeof when, "%Y-%m-%d %H:%M:%S", &lt);
+
+        gdx::diag::Input in;
+        in.chain = &chain; in.gif = job->gif.get(); in.plan = &job->plan; in.frames = &frames; in.layered = job->layered.get();
+        in.settingsText = st.str(); in.methodName = m_methodLabel ? std::string(m_methodLabel->getString()) : std::string("?");
+        in.modVersion = "v0.5.7-beta"; in.when = when;
+        in.platformText = std::string("plataforma: ")
+#ifdef GEODE_PLATFORM_NAME
+            + GEODE_PLATFORM_NAME
+#else
+            + "?"
+#endif
+#ifdef GEODE_GD_VERSION_STRING
+            + "   GD " + GEODE_GD_VERSION_STRING
+#endif
+            ;
+        in.note = note;
+        in.calcSeconds = job->reused ? -1.0 : std::chrono::duration<double>(std::chrono::steady_clock::now() - job->t0).count();
+        in.editorRoom = this->editorRoom(); in.threads = job->threads; in.baseGroup = p.baseGroup;
+        in.originX = p.eo.originX; in.originY = p.eo.originY; in.trigX = p.trigX; in.longSide = p.eo.longSide; in.channels = m_chan; in.gray = m_gray;
+        gdx::diag::Output out = gdx::diag::build(in);
+
+        namespace fs = std::filesystem;
+        const fs::path root = mod->getSaveDir() / "diagnostics";
+        const fs::path dir = root / (std::string(stamp) + "_m" + std::to_string(m_method + 1));
+        std::error_code ec; fs::create_directories(dir, ec);
+        auto put = [&](const char* name, const char* data, size_t n) { std::ofstream f(dir / name, std::ios::binary); if (f) f.write(data, std::streamsize(n)); };
+        put("informe.txt", out.informe.data(), out.informe.size());
+        put("cadena.txt", chain.data(), chain.size());
+        put("objetos.tsv", out.objetos.data(), out.objetos.size());
+        put("triggers.tsv", out.triggers.data(), out.triggers.size());
+        if (!out.comparacion.empty()) put("comparacion.png", reinterpret_cast<const char*>(out.comparacion.data()), out.comparacion.size());
+        if (!out.detalle.empty()) put("detalle.png", reinterpret_cast<const char*>(out.detalle.data()), out.detalle.size());
+
+        // solo se conservan los 8 informes mas recientes (cada uno puede pesar varios MB)
+        std::vector<fs::path> all; for (auto& e : fs::directory_iterator(root, ec)) if (e.is_directory(ec)) all.push_back(e.path());
+        std::sort(all.begin(), all.end());
+        for (size_t i = 0; i + 8 < all.size(); ++i) fs::remove_all(all[i], ec);
+
+        Notification::create("Informe guardado en: " + dir.string(), NotificationIcon::Success, 6.f)->show();
+        log::info("GIF Importer: informe de diagnostico en {}", dir.string());
+    } catch (...) {
+        Notification::create("No se pudo guardar el informe de diagnostico", NotificationIcon::Error, 4.f)->show();
+    }
 }
 
 void GifPopup::finishBuild(std::shared_ptr<BuildJob> job) {
@@ -839,6 +922,7 @@ void GifPopup::finishBuild(std::shared_ptr<BuildJob> job) {
             }
             char m2[128];
             std::snprintf(m2, sizeof m2, solo ? "Frame 0 colocado (sin triggers)" : "Hoja de %d frames colocada (sin triggers)", int(frames.size()));
+            this->saveDiagnostics(job, p, s2, "modo de diagnostico: hoja de frames / solo frame 0 (sin triggers)");
             this->startPlacement(s2, nObjs, m2);
             this->onClose(nullptr);
             return;
@@ -874,6 +958,7 @@ void GifPopup::finishBuild(std::shared_ptr<BuildJob> job) {
     }
     char msg[160];
     std::snprintf(msg, sizeof msg, "GIF colocado: %d frames, %zu objetos, grupos %d-%d", N, count, p.baseGroup, p.baseGroup + groupCount - 1);
+    this->saveDiagnostics(job, p, str, "");
     this->startPlacement(str, count, msg);
     this->onClose(nullptr);
 }

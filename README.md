@@ -50,6 +50,9 @@ Una animacion = un conjunto de capas y, por frame, el subconjunto visible (`engi
 * **Canales (sin HSV)** en 20-29: un Color trigger por canal de la paleta (como 18/19); el 26 usa sus propios canales.
 * Banco: `tests/bench_lsa.cpp` (tiempo + PSNR + hash). Si el hash no cambia, la optimizacion no cambia la calidad.
 
+## Informe de diagnostico
+Ajuste `save-report`: al colocar guarda `informe.txt`, `cadena.txt`, `objetos.tsv`, `triggers.tsv`, `comparacion.png` y `detalle.png` en `diagnostics/` (carpeta de guardado del mod). Codigo: `engine/diag.hpp`; prueba: `tests/report_test.cpp`.
+
 ## Ventana
 Metodo (flechas, 17 de imagen + el 18 de capas + el 19 de arbol) · **Objetos por frame** (10–5000) · Lado largo · **Frames maximos** (2–300) · Escala de grises · GIF / Colocar / Ajustes.
 

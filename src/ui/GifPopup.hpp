@@ -1,6 +1,7 @@
 #pragma once
 #include <Geode/Geode.hpp>
 #include <atomic>
+#include <chrono>
 #include <memory>
 #include <string>
 #include <vector>
@@ -50,6 +51,8 @@ protected:
         int paletteK = 128;
         std::vector<std::array<uint8_t, 3>> palette;         // paleta comun (metodos 1-17)
         std::shared_ptr<gdx::LayeredAnim> layered;           // metodos 18-19
+        std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();   // inicio del calculo (informe de diagnostico)
+        bool reused = false;                                 // las capas ya venian de la vista previa
         std::atomic<bool> done{false};
     };
 
@@ -75,6 +78,7 @@ protected:
     void tick(float);
     void applyPreview(std::shared_ptr<PreviewJob> job);
     void finishBuild(std::shared_ptr<BuildJob> job);
+    void saveDiagnostics(std::shared_ptr<BuildJob> const& job, gdx::GifExportParams const& p, std::string const& chain, std::string const& note);   // ajuste "save-report"
     void buildPreview();
     void setStatus(std::string const& a, std::string const& b = "", std::string const& note = "");
 

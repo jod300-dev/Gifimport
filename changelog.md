@@ -1,3 +1,13 @@
+# v0.5.7-beta
+- **Nuevo ajuste "Guardar informe de diagnostico al colocar"** (Ajustes > Diagnostico, desactivado por defecto). Cada vez que colocas un GIF guarda en `<carpeta del mod>/diagnostics/<fecha>_m<metodo>/`:
+  - `informe.txt`: version, plataforma, ajustes del mod y de la ventana, datos del GIF (tamano, frames, retardos), plan de frames, tiempo de calculo, estadisticas de la cadena (objetos por id, caja, z-order, grupos, canales),
+    **comprobaciones automaticas** (grupos objetivo sin objetos, triggers spawn que nadie lanza, canales de color sin Color trigger, canal 1 usado, z=0, escalas diminutas/enormes, NaN, mas de 200000 objetos),
+    la estructura del metodo (capas, visibles por frame, grupos, canales, paleta; para 18/19 restOf/patchOf/medoid/parent), los triggers por grupo y el PSNR de cada frame medido contra el GIF.
+  - `cadena.txt`: la cadena de GD exacta que se coloco (con ella reproduzco todo en el simulador), `objetos.tsv` (id, x, y, escala, giro, z, capa, canal, grupos, HSV) y `triggers.tsv` (tipo, posicion, objetivo,
+    grupos propios, opacidad, fundido, retardo, color, canal).
+  - `comparacion.png` (10 frames: original / lo que calculo el mod / diferencia x3) y `detalle.png` (2 frames grandes). Se conservan los 8 informes mas recientes. Nunca rompe la colocacion: si falla algo, solo avisa.
+  - Motor: `src/engine/diag.hpp` (sin dependencias de Geode, incluye un codificador PNG propio). Prueba: `tests/report_test.cpp`. El comprobador detecta el fallo de la 0.5.5 (20-29 sin Color triggers de paleta).
+
 # v0.5.6-beta
 - **Arreglo de compilacion en Windows**: en `lsa_stt.hpp` una variable se llamaba `far`, que `windows.h` define como macro vacia (error `expected unqualified-id`); renombrada. Quitado tambien el `getenv` de depuracion (aviso de MSVC). Probado ademas compilando con `-Dfar= -Dnear= -std=c++23`.
 - **Metodos 20-29 con "Canales (sin HSV)": faltaban los Color triggers.** El exportador de las capas LSA no emitia los Color triggers de la paleta (los objetos usaban canales que nadie coloreaba:
