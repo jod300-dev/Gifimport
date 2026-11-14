@@ -8,9 +8,9 @@
 	},
 	"id": "patasma.gif_importer",
 	"name": "GIF Importer",
-	"version": "v0.5.5-beta",
+	"version": "v0.5.6-beta",
 	"developer": "Patasma",
-	"description": "Importa GIFs animados al editor usando Alpha triggers + Spawn triggers en bucle infinito. Eliges objetos por frame y metodo de imagen (17 metodos + 18 por capas + 19 arbol de deltas). BETA.",
+	"description": "Importa GIFs animados al editor usando Alpha triggers + Spawn triggers en bucle infinito. Eliges objetos por frame y metodo de imagen (17 metodos + 18 por capas + 19 arbol de deltas + 20-29 capas LSA). BETA.",
 	"resources": {
 		"spritesheets": {
 			"GifBtn": [
@@ -96,6 +96,18 @@
 				"Maximo"
 			],
 			"description": "Con muchos frames <cy>Rapido</c> es lo recomendable."
+		},
+		"compute-effort": {
+			"type": "string",
+			"default": "Normal",
+			"name": "Duracion de calculo (metodos 18-29)",
+			"one-of": [
+				"Rapido",
+				"Normal",
+				"Alto",
+				"Maximo"
+			],
+			"description": "Cuanto tiempo se dedica a buscar la mejor posicion de cada objeto en los metodos 18 a 29. <cy>Rapido</c>: calcula ~1,2x-1,3x mas rapido con ~0,1-0,3 dB menos. <cy>Normal</c>: el equilibrio de siempre. <cy>Alto</c> y <cy>Maximo</c>: mas lento, un poco mas de calidad. Con muchos frames usa Rapido o Normal."
 		},
 		"max-raster": {
 			"type": "int",

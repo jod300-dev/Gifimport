@@ -13,6 +13,8 @@
 // ============================================================================
 #pragma once
 #include "lsa_core.hpp"
+#include "lsa_stt.hpp"
+#include <functional>
 
 namespace gdx {
 namespace lsa {
@@ -31,7 +33,7 @@ inline const char* methodDesc(int k) {
         "Un trazado por frame, partiendo del anterior y afinando posicion, tamano y giro de cada forma. Es lento pero saca la maxima calidad por objeto.",
         "Reparte los objetos entre frames segun lo que mejora cada uno y reutiliza la capa de frames identicos o casi (ping-pong, pausas).",
         "Fondo quieto y, encima, solo las zonas que se mueven (cada una con sus variantes). Ideal para personajes sobre fondo fijo.",
-        "Las formas no cambian: cada frame solo recolorea canales con Color triggers. Para destellos, brillos y ciclos de color (sin movimiento). Usa canales 2+.",
+        "Rectangulos fijos que tapizan la imagen sin solaparse (teselado espacio-temporal) y cada frame solo recolorea canales con Color triggers. Colores exactos, pocos objetos; ideal para ciclos de color, destellos y pixel art. Usa canales 2+.",
         "Como el 20, pero cada tanda de formas nuevas se afina con busqueda local para que cada objeto rinda mas.",
         "Prueba varios metodos (20, 21, 22, 24, 25, 29 y 26 si encaja) y se queda con el de mejor calidad con ese presupuesto. Lento.",
         "Celdas grandes donde nada cambia y pequenas donde hay movimiento; cada celda tiene sus variantes compartidas entre frames."};
@@ -331,14 +333,19 @@ inline bool buildOptimizer(const Ctx& c, LsaAnim& A) {
 struct Live { Shape s; int birth = 0; };
 struct Fin { Shape s; int birth = 0, death = 0; };
 
+// v0.5.6: una forma "sigue valiendo" mientras el CONTENIDO bajo ella no cambie respecto al frame donde se trazo (se compara el frame suavizado actual con el
+// suavizado del frame de nacimiento), no mientras su error frente al objetivo sea pequeno. Antes se comparaba con el objetivo: una forma que ya era
+// aproximada marcaba casi toda la imagen como "mala", moria en el frame siguiente aunque no cambiara nada y el frame quedaba con 4 formas gigantes encima
+// (PSNR de 13 dB en frames sueltos). Lo que hay que repintar es solo: lo que cambio desde el nacimiento de la forma visible + lo que quedo sin cubrir.
 inline bool lifetimesRun(const Ctx& c, double tau0, long Bobj, bool refine, std::vector<Fin>& fin, bool& cancelled) {
     const int N = c.N, W = c.W, H = c.H; const size_t np = size_t(W) * H;
     std::vector<double> wt(size_t(N), 0.0); double mean = 0;
     for (int i = 1; i < N; ++i) { wt[size_t(i)] = diffFrac(c, i, i - 1) * double(np) + 8.0; mean += wt[size_t(i)]; }
     mean = N > 1 ? mean / (N - 1) : 1.0; wt[0] = std::max(c.contentArea * 0.5, 2.0 * mean);
-    std::vector<double> cum(size_t(N) + 1, 0.0); for (int i = N - 1; i >= 0; --i) cum[size_t(i)] = cum[size_t(i) + 1] + wt[size_t(i)];
+    std::vector<double> cum(size_t(N) + 2, 0.0); for (int i = N - 1; i >= 0; --i) cum[size_t(i)] = cum[size_t(i) + 1] + wt[size_t(i)];
     const double totW = cum[0];
     std::vector<Live> alive; fin.clear(); double tau = tau0; long pool = Bobj, used = 0; double planned = 0;
+    double sumCnt = 0, sumWt = 0;                                                    // calibra el area futura estimada con la real
     const int rounds = std::clamp(c.quality, 1, 3);
     for (int i = 0; i < N; ++i) {
         if (isCancelled(c.prog)) { cancelled = true; return false; }
@@ -346,15 +353,17 @@ inline bool lifetimesRun(const Ctx& c, double tau0, long Bobj, bool refine, std:
         const Image& tg = c.fr[size_t(i)];
         auto orderOf = [&]() { std::vector<size_t> o(alive.size()); for (size_t k = 0; k < o.size(); ++k) o[k] = k;
             std::stable_sort(o.begin(), o.end(), [&](size_t a, size_t b) { return alive[a].birth != alive[b].birth ? alive[a].birth < alive[b].birth : alive[a].s.z < alive[b].s.z; }); return o; };
+        // el contenido bajo el pixel p cambio desde el frame `birth` (alfa incluido)
+        auto drifted = [&](size_t p, int birth) { return lay::pixDiff(&c.sm[size_t(i)].rgba[p * 4], &c.sm[size_t(birth)].rgba[p * 4], c.thr) > c.tol; };
+        std::vector<int32_t> ids; std::vector<Shape> shp;
+        auto buildIds = [&]() { shp.clear(); shp.reserve(alive.size()); for (auto& l : alive) shp.push_back(l.s); return idBuffer(shp, orderOf(), W, H); };
         if (i > 0 && !alive.empty()) {
             for (int pass = 0; pass < 3; ++pass) {
-                std::vector<Shape> sh; sh.reserve(alive.size()); for (auto& l : alive) sh.push_back(l.s);
-                const std::vector<size_t> ord = orderOf(); const std::vector<int32_t> ids = idBuffer(sh, ord, W, H);
+                ids = buildIds();
                 std::vector<int> nvis(alive.size(), 0), nbad(alive.size(), 0);
                 for (size_t p = 0; p < np; ++p) {
                     const int32_t id = ids[p]; if (id < 0) continue; ++nvis[size_t(id)];
-                    const uint8_t* t = &c.sm[size_t(i)].rgba[p * 4]; const Shape& s = sh[size_t(id)];
-                    if (t[3] < c.thr || std::max({std::abs(int(t[0]) - s.r), std::abs(int(t[1]) - s.g), std::abs(int(t[2]) - s.b)}) > c.tol) ++nbad[size_t(id)];
+                    if (drifted(p, alive[size_t(id)].birth)) ++nbad[size_t(id)];
                 }
                 std::vector<Live> keep; bool drop = false;
                 for (size_t k = 0; k < alive.size(); ++k) {
@@ -364,18 +373,30 @@ inline bool lifetimesRun(const Ctx& c, double tau0, long Bobj, bool refine, std:
                 alive = std::move(keep); if (!drop) break;
             }
         }
-        // lienzo con lo que sobrevive; huecos y errores -> mascara
+        // lienzo con lo que sobrevive; mascara = lo que cambio bajo la forma visible + lo que quedo sin cubrir
         Image canvas; canvas.w = W; canvas.h = H; canvas.rgba.assign(np * 4, 0);
-        if (!alive.empty()) {
-            std::vector<Shape> sh; const auto ord = orderOf(); sh.reserve(alive.size());
+        std::vector<uint8_t> raw(np, 0);
+        if (i == 0 || alive.empty()) { for (size_t p = 0; p < np; ++p) raw[p] = tg.rgba[p * 4 + 3] >= c.thr ? 1 : 0; }
+        else {
+            ids = buildIds();
+            const std::vector<size_t> ord = orderOf(); std::vector<Shape> sh; sh.reserve(ord.size());
             for (size_t r = 0; r < ord.size(); ++r) { Shape s = alive[ord[r]].s; s.z = int16_t(std::min<size_t>(32000, r)); sh.push_back(s); }
             canvas = renderShapes(sh, W, H);
+            for (size_t p = 0; p < np; ++p) {
+                if (c.sm[size_t(i)].rgba[p * 4 + 3] < c.thr) continue;                        // transparente: no hay nada que pintar
+                const int32_t id = ids[p];
+                raw[p] = (id < 0 || drifted(p, alive[size_t(id)].birth)) ? 1 : 0;
+            }
         }
-        std::vector<uint8_t> mask = lay::changeMask(c.sm[size_t(i)], canvas, c.tol, c.lo.grow, c.thr);
-        if (i == 0) for (size_t p = 0; p < np; ++p) mask[p] = tg.rgba[p * 4 + 3] >= c.thr ? 1 : 0;
+        std::vector<uint8_t> mask = lay::cleanMask(raw, W, H, c.lo.grow);
+        if (i == 0 || alive.empty()) for (size_t p = 0; p < np; ++p) mask[p] = tg.rgba[p * 4 + 3] >= c.thr ? 1 : 0;
         size_t cnt = 0; for (uint8_t v : mask) cnt += v;
-        int b = int(std::max(0.0, double(pool) * wt[size_t(i)] / std::max(1e-9, cum[size_t(i)])));
+        // presupuesto: densidad uniforme = lo que queda en la bolsa / (area que hay que pintar ahora + la que se espera en los frames que faltan)
+        const double ratio = (i > 1 && sumWt > 0) ? std::clamp(sumCnt / sumWt, 0.4, 3.0) : 1.0;
+        const double futArea = cum[size_t(i) + 1] * ratio;
+        int b = int(std::max(0.0, double(pool) * double(cnt) / std::max(1e-9, double(cnt) + futArea)));
         b = std::min(b, lay::areaBudget(cnt, 100000)); if (cnt > 0) b = std::max(b, std::min<int>(4, int(pool)));
+        if (i > 0) { sumCnt += double(cnt); sumWt += wt[size_t(i)]; }
         if (cnt > 0 && b > 0 && pool > 0) {
             Image under = canvas; std::vector<uint8_t> valid(np, 0); bool any = false;
             for (size_t p = 0; p < np; ++p) { valid[p] = canvas.rgba[p * 4 + 3] > 0; any |= valid[p] != 0; }
@@ -400,8 +421,12 @@ inline bool buildLifetimes(const Ctx& c, LsaAnim& A, bool refine) {
         const long Bobj = long(double(c.total) * (0.94 - 0.04 * attempt));
         if (!lifetimesRun(c, tau0, Bobj, refine, fin, cancelled)) return false;
         std::set<std::pair<int, int>> keys; for (auto& f : fin) keys.insert({f.birth, f.death});
-        if (int(keys.size()) <= 420 || attempt == 3) break;
-        tau0 *= 2.2;                                                                    // demasiadas capas (triggers): vidas mas largas
+        if (attempt == 3) break;
+        // triggers que costaria esa estructura (una capa por par nacimiento-muerte): si pasan del 9 % del presupuesto, vidas mas largas
+        LsaAnim st; st.W = c.W; st.H = c.H; st.frames = N; st.vis.assign(size_t(N), {});
+        for (auto& k : keys) { LsaLayer L; L.shapes.assign(1, Shape{}); L.always = (k.first == 0 && k.second == N - 1); const int id = int(st.layers.size()); st.layers.push_back(std::move(L)); for (int g = k.first; g <= k.second; ++g) st.vis[size_t(g)].push_back(id); }
+        if (int(keys.size()) <= 420 && double(lsaTriggerCount(st)) <= 0.09 * double(c.total)) break;
+        tau0 *= 1.9;                                                                    // demasiadas capas (triggers): vidas mas largas
     }
     A.vis.assign(size_t(N), {});
     std::map<std::pair<int, int>, int> idOf;
@@ -418,121 +443,7 @@ inline bool buildLifetimes(const Ctx& c, LsaAnim& A, bool refine) {
     return A.objectCount() > 0;
 }
 
-// ------------------------------------------------------------------ 26: animacion por colores ----
-inline bool buildColorAnim(const Ctx& c, LsaAnim& A) {
-    if (!c.opaqueAll) { A.note = "La animacion por colores necesita un GIF sin transparencia"; return false; }
-    const int N = c.N, W = c.W, H = c.H; const size_t np = size_t(W) * H;
-    int sw, sh; fitSize(W, H, 96, sw, sh);
-    std::vector<Image> low; low.resize(size_t(N)); for (int i = 0; i < N; ++i) low[size_t(i)] = resizeArea(c.fr[size_t(i)], sw, sh);
-    const size_t ns = size_t(sw) * sh, dims = size_t(N) * 3;
-    std::vector<float> feat(ns * dims);
-    for (size_t p = 0; p < ns; ++p) for (int i = 0; i < N; ++i) for (int k = 0; k < 3; ++k) feat[p * dims + size_t(i) * 3 + size_t(k)] = float(low[size_t(i)].rgba[p * 4 + size_t(k)]);
-    const int Kmax = std::clamp(int(0.3 * double(c.total) / (2.0 * N)), 4, 64);
-    Rng rng(c.seed);
-    auto kmeans = [&](int K, std::vector<float>& cen, std::vector<int>& as) -> double {
-        cen.assign(size_t(K) * dims, 0.f); as.assign(ns, 0);
-        std::vector<double> d2(ns, 1e30); size_t first = rng.next() % ns;
-        std::memcpy(&cen[0], &feat[first * dims], dims * sizeof(float));
-        for (int k = 1; k < K; ++k) {                                                  // k-means++
-            double sum = 0;
-            for (size_t p = 0; p < ns; ++p) { double d = 0; const float* a = &feat[p * dims]; const float* b = &cen[size_t(k - 1) * dims]; for (size_t t = 0; t < dims; ++t) { double x = a[t] - b[t]; d += x * x; } d2[p] = std::min(d2[p], d); sum += d2[p]; }
-            double r = double(rng.next() % 1000003) / 1000003.0 * sum, acc = 0; size_t pick = ns - 1;
-            for (size_t p = 0; p < ns; ++p) { acc += d2[p]; if (acc >= r) { pick = p; break; } }
-            std::memcpy(&cen[size_t(k) * dims], &feat[pick * dims], dims * sizeof(float));
-        }
-        double err = 0;
-        for (int it = 0; it < 8; ++it) {
-            err = 0;
-            for (size_t p = 0; p < ns; ++p) { double bd = 1e30; int bk = 0; const float* a = &feat[p * dims];
-                for (int k = 0; k < K; ++k) { const float* b = &cen[size_t(k) * dims]; double d = 0; for (size_t t = 0; t < dims; ++t) { double x = a[t] - b[t]; d += x * x; if (d >= bd) break; } if (d < bd) { bd = d; bk = k; } }
-                as[p] = bk; err += bd; }
-            std::vector<double> acc(size_t(K) * dims, 0.0); std::vector<int> cn(size_t(K), 0);
-            for (size_t p = 0; p < ns; ++p) { ++cn[size_t(as[p])]; for (size_t t = 0; t < dims; ++t) acc[size_t(as[p]) * dims + t] += feat[p * dims + t]; }
-            for (int k = 0; k < K; ++k) if (cn[size_t(k)]) for (size_t t = 0; t < dims; ++t) cen[size_t(k) * dims + t] = float(acc[size_t(k) * dims + t] / cn[size_t(k)]);
-        }
-        return std::sqrt(err / double(ns * dims));
-    };
-    std::vector<float> cen, cenBest; std::vector<int> as, asBest; double eMax = -1; int K = Kmax;
-    {   // error de referencia con Kmax; se elige el menor K cuyo error no supera 1.3x ese (o 6 niveles de color)
-        std::vector<int> ks; for (int k : {4, 8, 16, 32, 48, 64}) if (k <= Kmax) ks.push_back(k); if (ks.empty() || ks.back() != Kmax) ks.push_back(Kmax);
-        std::vector<double> es; std::vector<std::vector<float>> cs; std::vector<std::vector<int>> asl;
-        for (int k : ks) { std::vector<float> ce; std::vector<int> a; es.push_back(kmeans(k, ce, a)); cs.push_back(std::move(ce)); asl.push_back(std::move(a)); }
-        eMax = es.back(); size_t pick = ks.size() - 1;
-        for (size_t i = 0; i < ks.size(); ++i) if (es[i] <= std::max(1.15 * eMax, 2.5)) { pick = i; break; }
-        K = ks[pick]; cenBest = cs[pick]; asBest = asl[pick];
-    }
-    // asignacion a resolucion completa con una muestra de frames
-    const int Nf = std::min(N, 16); std::vector<int> fs; for (int k = 0; k < Nf; ++k) fs.push_back(int(int64_t(k) * N / Nf));
-    std::vector<int> lab(np, 0);
-    lay::parallelFor(H, c.threads, [&](int y) {
-        for (int x = 0; x < W; ++x) {
-            const size_t p = size_t(y) * W + x; double bd = 1e30; int bk = 0;
-            for (int k = 0; k < K; ++k) { double d = 0; for (int f : fs) { const uint8_t* q = &c.fr[size_t(f)].rgba[p * 4]; const float* ce = &cenBest[size_t(k) * dims + size_t(f) * 3];
-                    double d0 = q[0] - ce[0], d1 = q[1] - ce[1], d2 = q[2] - ce[2]; d += d0 * d0 + d1 * d1 + d2 * d2; if (d >= bd) break; } if (d < bd) { bd = d; bk = k; } }
-            lab[p] = bk;
-        }
-    });
-    {   // filtro de moda 3x3 (quita motas)
-        std::vector<int> o = lab;
-        for (int y = 1; y + 1 < H; ++y) for (int x = 1; x + 1 < W; ++x) { int cnt[64] = {0}; for (int dy = -1; dy <= 1; ++dy) for (int dx = -1; dx <= 1; ++dx) ++cnt[lab[size_t(y + dy) * W + x + dx]];
-            int bk = lab[size_t(y) * W + x], bc = cnt[bk]; for (int k = 0; k < K; ++k) if (cnt[k] > bc + 1) { bc = cnt[k]; bk = k; } o[size_t(y) * W + x] = bk; }
-        lab = std::move(o);
-    }
-    // colores por frame y canal (media de los pixeles del canal a resolucion completa)
-    std::vector<std::array<uint8_t, 3>> colF; A.colorAt.assign(size_t(N), std::vector<std::array<uint8_t, 3>>(size_t(K), {0, 0, 0}));
-    {
-        std::vector<int> cn(size_t(K), 0); for (size_t p = 0; p < np; ++p) ++cn[size_t(lab[p])];
-        for (int i = 0; i < N; ++i) { std::vector<double> acc(size_t(K) * 3, 0.0);
-            for (size_t p = 0; p < np; ++p) for (int k = 0; k < 3; ++k) acc[size_t(lab[p]) * 3 + size_t(k)] += c.fr[size_t(i)].rgba[p * 4 + size_t(k)];
-            for (int k = 0; k < K; ++k) for (int t = 0; t < 3; ++t) A.colorAt[size_t(i)][size_t(k)][size_t(t)] = cn[size_t(k)] ? uint8_t(std::clamp(acc[size_t(k) * 3 + size_t(t)] / cn[size_t(k)] + 0.5, 0.0, 255.0)) : 0; }
-    }
-    A.colorChannels = K; A.firstChannel = std::clamp(c.lo.firstChannel, 2, 999 - K);
-    A.vis.assign(size_t(N), {});
-    LsaAnim st = A; st.layers.resize(1); st.layers[0].always = true; st.layers[0].shapes.assign(1, Shape{});
-    const long Bobj = std::max<long>(long(double(c.total) * 0.3), c.total - lsaTriggerCount(st) - c.total / 40);
-    // 1) descomposicion exacta en rectangulos (greedy: ancho maximo y luego alto maximo): perfecta para formas rectilineas
-    std::vector<Shape> exact; bool exactOk = true;
-    {
-        std::vector<uint8_t> cov(np, 0);
-        for (int y = 0; y < H && exactOk; ++y) for (int x = 0; x < W; ++x) {
-            const size_t p0 = size_t(y) * W + x; if (cov[p0]) continue;
-            const int l = lab[p0]; int w = 1; while (x + w < W && !cov[p0 + size_t(w)] && lab[p0 + size_t(w)] == l) ++w;
-            int h = 1; bool grow = true;
-            while (y + h < H && grow) { for (int xx = x; xx < x + w; ++xx) { const size_t q = size_t(y + h) * W + xx; if (cov[q] || lab[q] != l) { grow = false; break; } } if (grow) ++h; }
-            for (int yy = y; yy < y + h; ++yy) for (int xx = x; xx < x + w; ++xx) cov[size_t(yy) * W + xx] = 1;
-            Shape sh2; sh2.cx = x + 0.5f * w; sh2.cy = y + 0.5f * h; sh2.w = float(w); sh2.h = float(h); sh2.rot = 0; sh2.r = uint8_t(l & 255); sh2.g = uint8_t(l >> 8); sh2.b = 0; sh2.z = 0;
-            exact.push_back(sh2);
-            if (long(exact.size()) > Bobj) { exactOk = false; break; }
-        }
-    }
-    if (exactOk) {
-        LsaLayer L; L.depth = 1; L.always = true; L.shapes = std::move(exact); A.layers.push_back(std::move(L));
-        A.note = "canales " + std::to_string(K) + " (error de color " + std::to_string(int(eMax)) + "), rectangulos exactos";
-        return true;
-    }
-    // 2) si no caben: cuadtree sobre el mapa de etiquetas: se divide la celda con mas pixeles que no son de su etiqueta mayoritaria
-    struct Cell { int x0, y0, x1, y1, maj; long err; };
-    auto stats = [&](int x0, int y0, int x1, int y1) { int cnt[64] = {0}; for (int y = y0; y < y1; ++y) for (int x = x0; x < x1; ++x) ++cnt[lab[size_t(y) * W + x]];
-        int bk = 0; for (int k = 1; k < K; ++k) if (cnt[k] > cnt[bk]) bk = k; return Cell{x0, y0, x1, y1, bk, long(x1 - x0) * (y1 - y0) - cnt[bk]}; };
-    auto cmp = [](const Cell& a, const Cell& b) { return a.err < b.err; };
-    std::priority_queue<Cell, std::vector<Cell>, decltype(cmp)> pq(cmp);
-    std::vector<Cell> leaves; pq.push(stats(0, 0, W, H));
-    long count = 1;
-    while (!pq.empty() && count < Bobj) {
-        Cell t = pq.top(); pq.pop();
-        if (t.err == 0 || (t.x1 - t.x0 <= 1 && t.y1 - t.y0 <= 1)) { leaves.push_back(t); continue; }
-        const int w = t.x1 - t.x0, h = t.y1 - t.y0;
-        if (w >= 2 && h >= 2) { int xm = t.x0 + w / 2, ym = t.y0 + h / 2; pq.push(stats(t.x0, t.y0, xm, ym)); pq.push(stats(xm, t.y0, t.x1, ym)); pq.push(stats(t.x0, ym, xm, t.y1)); pq.push(stats(xm, ym, t.x1, t.y1)); count += 3; }
-        else if (w >= 2) { int xm = t.x0 + w / 2; pq.push(stats(t.x0, t.y0, xm, t.y1)); pq.push(stats(xm, t.y0, t.x1, t.y1)); count += 1; }
-        else { int ym = t.y0 + h / 2; pq.push(stats(t.x0, t.y0, t.x1, ym)); pq.push(stats(t.x0, ym, t.x1, t.y1)); count += 1; }
-    }
-    while (!pq.empty()) { leaves.push_back(pq.top()); pq.pop(); }
-    LsaLayer L; L.depth = 1; L.always = true;
-    for (const Cell& t : leaves) { Shape s; s.cx = 0.5f * float(t.x0 + t.x1); s.cy = 0.5f * float(t.y0 + t.y1); s.w = float(t.x1 - t.x0); s.h = float(t.y1 - t.y0); s.rot = 0; s.r = uint8_t(t.maj & 255); s.g = uint8_t(t.maj >> 8); s.b = 0; s.z = 0; L.shapes.push_back(s); }
-    A.layers.push_back(std::move(L));
-    A.note = "canales " + std::to_string(K) + " (error de color " + std::to_string(int(eMax)) + ")";
-    return !A.layers[0].shapes.empty();
-}
+// ------------------------------------------------------------------ 26: animacion por colores: ver lsa_stt.hpp ----
 
 // ------------------------------------------------------------------ 28: auto ----
 inline bool buildAuto(const Ctx& c, LsaAnim& A, int& chosen);
@@ -560,7 +471,7 @@ inline bool buildKind(const Ctx& c, LsaAnim& A, int kind) {
 inline bool buildAuto(const Ctx& c, LsaAnim& A, int& chosen) {
     std::vector<int> kinds = {1, 2, 3, 5, 6, 10};
     if (c.opaqueAll) kinds.push_back(7);
-    if (c.N <= 24 && int64_t(c.W) * c.H <= 200000) kinds.push_back(4);
+    if (c.quality >= 1 && c.N <= 24 && int64_t(c.W) * c.H <= 200000) kinds.push_back(4);
     double bestScore = -1e9; LsaAnim bestA; chosen = 0;
     for (int k : kinds) {
         if (isCancelled(c.prog)) return false;

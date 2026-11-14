@@ -23,6 +23,13 @@ public:
         tx = (W + kTile - 1) / kTile; ty = (H + kTile - 1) / kTile;
         tileErr.assign(size_t(tx) * ty, 0.0);
         L = float(std::max(W, H));
+        // sumas por fila (prefijos): cada fila de un candidato cuesta O(1) en vez de O(ancho). Los valores son enteros exactos, asi que
+        // los resultados son IDENTICOS a sumar pixel a pixel (solo cambia la velocidad).
+        pre.assign(size_t(W + 1) * H, Acc{});
+        for (int y = 0; y < H; ++y) {
+            Acc a{}; Acc* row = &pre[size_t(y) * (W + 1)];
+            for (int x = 0; x < W; ++x) { const Px& q = px[size_t(y) * W + x]; a.r += q.r; a.g += q.g; a.b += q.b; a.tt += q.tt; row[x + 1] = a; }
+        }
     }
 
     // GIF con transparencia: los rectangulos solo pueden cubrir pixeles OPACOS (valid[i] = 1). Los transparentes no cuentan como error.
@@ -96,6 +103,8 @@ public:
 private:
     static constexpr int kTile = 8;
     struct Px { int32_t r, g, b, tt, e; };
+    struct Acc { int32_t r = 0, g = 0, b = 0, tt = 0, e = 0; };         // suma acumulada de una fila hasta x (exclusive)
+    std::vector<Acc> pre;                                                // (W + 1) por fila
     struct Ev { double gain = -1e300, mr = 0, mg = 0, mb = 0; };
     int W, H; float L;
     Rng rng;
@@ -116,6 +125,13 @@ private:
                 p.e = (hasMask && !mask[size_t(y) * W + x]) ? 0 : dr * dr + dg * dg + db * db;
                 tileErr[size_t(y / kTile) * tx + x / kTile] += p.e;
             }
+        for (int y = 0; y < H; ++y) rebuildRowE(y, 0);
+    }
+    // recalcula el prefijo del error de la fila y desde x0 (los demas prefijos no dependen del lienzo)
+    void rebuildRowE(int y, int x0) {
+        Acc* row = &pre[size_t(y) * (W + 1)];
+        int32_t acc = row[x0].e;
+        for (int x = x0; x < W; ++x) { acc += px[size_t(y) * W + x].e; row[x + 1].e = acc; }
     }
 
     template <class F>
@@ -163,8 +179,8 @@ private:
         bool touchesHole = false;
         forSpans(c, [&](int y, int xs, int xe) {
             if (hasMask && invPrefix[size_t(y) * (W + 1) + xe + 1] - invPrefix[size_t(y) * (W + 1) + xs] > 0) { touchesHole = true; return; }
-            const Px* p = &px[size_t(y) * W + xs];
-            for (int x = xs; x <= xe; ++x, ++p) { sr += p->r; sg += p->g; sb += p->b; stt += p->tt; se += p->e; }
+            const Acc* a0 = &pre[size_t(y) * (W + 1) + size_t(xs)]; const Acc* a1 = &pre[size_t(y) * (W + 1) + size_t(xe) + 1];
+            sr += double(a1->r - a0->r); sg += double(a1->g - a0->g); sb += double(a1->b - a0->b); stt += double(a1->tt - a0->tt); se += double(a1->e - a0->e);
             n += xe - xs + 1;
         });
         Ev e;
@@ -183,6 +199,7 @@ private:
                 int dr = px[i].r - R, dg = px[i].g - G, db = px[i].b - B;
                 px[i].e = (hasMask && !mask[i]) ? 0 : dr * dr + dg * dg + db * db;
             }
+            rebuildRowE(y, xs);
             bx0 = std::min(bx0, xs); bx1 = std::max(bx1, xe); by0 = std::min(by0, y); by1 = std::max(by1, y);
         });
         if (bx1 < 0) return;

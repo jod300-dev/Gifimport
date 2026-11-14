@@ -56,6 +56,7 @@ struct LayeredOptions {
     int method = 0;           // 0 = metodos 18/19; 1..10 = metodos 20..29 (capas LSA, ver lsa_methods.hpp)
     int channels = 0;         // >0: colores en CANALES (sin HSV): paleta de hasta este numero de colores; 0 = HSV
     int firstChannel = 2;     // primer canal de la paleta (el canal 1 NUNCA se usa)
+    int effort = 1;           // v0.5.6: duracion de calculo de 18-29: 0 Rapido (busqueda corta), 1 Normal (como antes), 2 Alto, 3 Maximo
     bool denoise = true;      // mediana 3x3 antes de trazar (quita el dither del GIF; el PSNR se mide contra el original)
 };
 
@@ -309,7 +310,11 @@ inline Image median3(const Image& s, int thr) {
                 }
             }
             uint8_t* q = o.at(x, y);
-            for (int c = 0; c < 3; ++c) { std::nth_element(v[c], v[c] + n / 2, v[c] + n); q[c] = v[c][n / 2]; }
+            for (int c = 0; c < 3; ++c) {
+                uint8_t* a = v[c];
+                for (int i = 1; i < n; ++i) { const uint8_t t = a[i]; int j = i - 1; while (j >= 0 && a[j] > t) { a[j + 1] = a[j]; --j; } a[j + 1] = t; }
+                q[c] = a[n / 2];
+            }
         }
     return o;
 }
@@ -469,10 +474,17 @@ inline Result traceHybrid(const Image& layerImg, const Image& target, const Imag
 }
 
 // Zona donde el objetivo difiere de lo que ya se ve: sin motas aisladas, con margen y sin agujeros de 1 px.
+inline std::vector<uint8_t> cleanMask(const std::vector<uint8_t>& raw, int W, int H, int grow);
 inline std::vector<uint8_t> changeMask(const Image& smT, const Image& smC, int tol, int grow, int thr) {
     const int W = smT.w, H = smT.h;
-    std::vector<uint8_t> raw(size_t(W) * H, 0), m(size_t(W) * H, 0);
+    std::vector<uint8_t> raw(size_t(W) * H, 0);
     for (size_t p = 0; p < raw.size(); ++p) raw[p] = pixDiff(&smT.rgba[p * 4], &smC.rgba[p * 4], thr) > tol ? 1 : 0;
+    return cleanMask(raw, W, H, grow);
+}
+// Limpieza de una mascara cruda: sin motas aisladas, con margen (grow) y sin agujeros de 1 px.
+inline std::vector<uint8_t> cleanMask(const std::vector<uint8_t>& raw, int W, int H, int grow) {
+    std::vector<uint8_t> m(size_t(W) * H, 0);
+    { bool any = false; for (uint8_t v : raw) if (v) { any = true; break; } if (!any) return m; }
     auto nb = [&](const std::vector<uint8_t>& v, int x, int y) {
         int n = 0;
         for (int dy = -1; dy <= 1; ++dy) for (int dx = -1; dx <= 1; ++dx) {
@@ -561,7 +573,7 @@ inline LayeredAnim buildLayered(const GifData& g, const GifPlan& plan, const Opt
     bool opaqueAll = true;
     for (int i = 0; i < N && opaqueAll; ++i) if (lay::opaqueCount(orig[size_t(i)], thr) != size_t(W) * H) opaqueAll = false;
     const bool usePainter = lo.painter != 0 && opaqueAll;
-    const int pq = std::clamp(std::max(base.quality, 1), 0, 3);
+    const int pq = std::clamp(base.quality, 0, 3);
     const double bf = std::clamp<double>(lo.bspFrac, 0.05, 1.0);
     const Image smMed = lay::blur3(med, thr);
 

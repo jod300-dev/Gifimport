@@ -42,6 +42,14 @@ Generaliza el metodo 18: en vez de K rests fijos, **cada frame se predice del fr
 * Con transparencia una delta no puede borrar lo del padre: en ese caso cada frame va directamente sobre el fondo.
 * Resultado en el GIF de prueba (34 frames, ~10k objetos): metodo actual 20.4 dB, metodo 18 22.9 dB, **metodo 19 23.2 dB** (peor frame 22.2 vs 21.7). Codigo: `src/engine/deltatree.hpp`.
 
+## Metodos 20-29 (capas LSA) y metodo 26
+Una animacion = un conjunto de capas y, por frame, el subconjunto visible (`engine/lsa*.hpp`). 20 Vidas | 21 Teselas | 22 Keyframes + residuos | 23 Optimizador | 24 Reparto RD | 25 Fondo + regiones | **26 Colores (Color triggers)** | 27 Vidas + optimizador | 28 Auto | 29 Cuadtree temporal.
+
+* **26 (teselado espacio-temporal, v0.5.6)**: rectangulos fijos que tapizan la imagen (BSP con el error medido en todos los frames), agrupados en K canales de color cuyo color cambia por frame con Color triggers. Sin solapes; colores = media por minimos cuadrados. Codigo: `src/engine/lsa_stt.hpp`.
+* **Duracion de calculo (18-29)**: ajuste Rapido/Normal/Alto/Maximo. Normal = comportamiento de la 0.5.5 (mismo resultado, ahora mas rapido).
+* **Canales (sin HSV)** en 20-29: un Color trigger por canal de la paleta (como 18/19); el 26 usa sus propios canales.
+* Banco: `tests/bench_lsa.cpp` (tiempo + PSNR + hash). Si el hash no cambia, la optimizacion no cambia la calidad.
+
 ## Ventana
 Metodo (flechas, 17 de imagen + el 18 de capas + el 19 de arbol) · **Objetos por frame** (10–5000) · Lado largo · **Frames maximos** (2–300) · Escala de grises · GIF / Colocar / Ajustes.
 

@@ -10,7 +10,7 @@ inline BuiltAnim buildForTest(const GifData& g, const GifPlan& plan, int mi, int
     BuiltAnim r;
     Options o; o.maxRaster = maxRaster; o.quality = 0; o.lightSpecialChannels = true; o.maxChannels = 0; o.colorChannels = false; o.mainChannels = false; o.budget = budget;
     if (mi >= 17) {
-        LayeredOptions lo; lo.perFrame = budget; lo.tree = mi == 18; lo.maxTotal = 200000; lo.channels = 0; lo.firstChannel = 2; lo.method = mi >= 19 ? mi - 18 : 0;
+        LayeredOptions lo; lo.perFrame = budget; lo.tree = mi == 18; lo.maxTotal = 200000; lo.channels = getenv("CHANNELS") ? 128 : 0; lo.firstChannel = 2; lo.method = mi >= 19 ? mi - 18 : 0;
         LayeredAnim A = buildAnim(g, plan, o, lo, nullptr, 4);
         r.note = A.note; r.chain = buildAnimString(A, plan, p, &r.err); r.triggers = animTriggerCount(A); r.groups = animGroupCount(A);
     } else if (mi < 17) {

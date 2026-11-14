@@ -23,6 +23,14 @@ namespace {
         if (q == "Maximo") return 3;
         return 0;                                                  // Rapido (por defecto: hay muchos frames)
     }
+    // Duracion de calculo de los metodos 18-29 (0 Rapido, 1 Normal = como antes, 2 Alto, 3 Maximo)
+    int effortFromSetting() {
+        auto q = Mod::get()->getSettingValue<std::string>("compute-effort");
+        if (q == "Rapido") return 0;
+        if (q == "Alto") return 2;
+        if (q == "Maximo") return 3;
+        return 1;
+    }
     // sliders 0..1 <-> valor
     float pfToSlider(int v) { return std::clamp(float(std::log(double(v) / kMinPF) / std::log(double(kMaxPF) / kMinPF)), 0.f, 1.f); }
     int sliderToPf(float s) {
@@ -462,6 +470,7 @@ gdx::LayeredOptions GifPopup::makeLayeredOptions() const {
     lo.channels = m_chan ? paletteSize() : 0;                       // sin el check: HSV
     lo.firstChannel = gdx::kFirstColorChannel;                      // siempre desde el 2: el canal 1 nunca se usa
     lo.reuse = float(std::clamp(mod->getSettingValue<double>("layered-reuse"), 0.0, 10.0) / 100.0);
+    lo.effort = effortFromSetting();                                // duracion de calculo (18-29)
     return lo;
 }
 
@@ -479,6 +488,7 @@ std::string GifPopup::layeredKey() const {
     key += mod->getSettingValue<bool>("layered-rotated") ? "|r1|" : "|r0|";
     key += std::to_string(mod->getSettingValue<double>("layered-reuse"));
     key += "|" + mod->getSettingValue<std::string>("quality");
+    key += "|E" + std::to_string(effortFromSetting());
     key += treeMode() ? "|T" : "|L";
     key += "|M" + std::to_string(lsaKind());
     key += m_chan ? "|c" : "|h";

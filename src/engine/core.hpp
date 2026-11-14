@@ -291,6 +291,18 @@ inline Image renderShapes(const std::vector<Shape>& shapes, int W, int H) {
         double ex = std::abs(hx * cs) + std::abs(hy * sn), ey = std::abs(hx * sn) + std::abs(hy * cs);
         int x0 = std::max(0, int(std::floor(s.cx - ex - 0.5))), x1 = std::min(W - 1, int(std::ceil(s.cx + ex + 0.5)));
         int y0 = std::max(0, int(std::floor(s.cy - ey - 0.5))), y1 = std::min(H - 1, int(std::ceil(s.cy + ey + 0.5)));
+        if (s.rot == 0.0f) {                       // alineada a ejes: lx = dx y ly = dy exactos -> el rango de x es el mismo en todas las filas
+            int xa = x1 + 1, xb = x0 - 1;
+            for (int x = x0; x <= x1; ++x) { const double dx = x + 0.5 - s.cx; if (dx >= -hx - 1e-4 && dx < hx + 1e-4) { if (xa > x1) xa = x; xb = x; } }
+            if (xa > xb) continue;
+            for (int y = y0; y <= y1; ++y) {
+                const double dy = y + 0.5 - s.cy;
+                if (!(dy >= -hy - 1e-4 && dy < hy + 1e-4)) continue;
+                uint8_t* p = c.at(xa, y);
+                for (int x = xa; x <= xb; ++x, p += 4) { p[0] = s.r; p[1] = s.g; p[2] = s.b; p[3] = 255; }
+            }
+            continue;
+        }
         for (int y = y0; y <= y1; ++y)
             for (int x = x0; x <= x1; ++x) {
                 double dx = x + 0.5 - s.cx, dy = y + 0.5 - s.cy;

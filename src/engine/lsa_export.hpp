@@ -47,7 +47,7 @@ inline Sched schedule(const LsaAnim& A) {
     for (int l : s.dyn) if (!v0.count(l)) s.initHide.push_back(l);
     s.hasI = !s.initHide.empty() || A.colorChannels > 0;
     s.groups = int(s.dyn.size()) + s.nSteps + 1 + (s.hasI ? 1 : 0);
-    s.triggers = 2 * s.nSteps + 1 + (s.hasI ? 1 : 0) + acts + int(s.initHide.size()) + A.colorChannels + 1 + (s.hasI ? 1 : 0);
+    s.triggers = 2 * s.nSteps + 1 + (s.hasI ? 1 : 0) + acts + int(s.initHide.size()) + A.colorChannels + 1 + (s.hasI ? 1 : 0) + int(A.palette.size());
     // bandas de z: una por valor de depth (capas con la misma depth comparten banda)
     std::map<int, int> span;
     for (int l = 0; l < nL; ++l) { if (A.layers[size_t(l)].shapes.empty()) continue; int mz = 0; for (auto& sh : A.layers[size_t(l)].shapes) mz = std::max<int>(mz, sh.z);
@@ -138,8 +138,10 @@ inline std::string buildLsaString(const LsaAnim& A, const GifPlan& plan, const G
     GdSize sz = gdImageSize(dim, p.eo);
     detail::TrigBoard board(detail::rowLeft(p.eo.originX - sz.w * 0.5, p.trigX), p.eo.originY + sz.h * 0.5 + 90.0);
     double x, y;
+    int nColTrig = 0;                                                  // Color triggers lanzados por spawn: cuadricula compacta (pueden apilarse), no una fila interminable
+    const double colX0 = detail::rowLeft(p.eo.originX - sz.w * 0.5, p.trigX), colY0 = p.eo.originY + sz.h * 0.5 + 90.0 + 200.0;
     auto colorTrig = [&](int ch, const std::array<uint8_t, 3>& c, int ownGroup) {
-        board.atAlpha(x, y);
+        x = colX0 + 30.0 * double(nColTrig % 40); y = colY0 + 30.0 * double(nColTrig / 40); ++nColTrig;
         detail::addTriggerHead(out, 899, x, y);
         out += ",7,"; out += std::to_string(c[0]); out += ",8,"; out += std::to_string(c[1]); out += ",9,"; out += std::to_string(c[2]);
         out += ",10,0,35,1,17,0,23,"; out += std::to_string(A.firstChannel + ch);
@@ -167,9 +169,17 @@ inline std::string buildLsaString(const LsaAnim& A, const GifPlan& plan, const G
         for (int l : S.initHide) { board.atAlpha(x, y); detail::addAlpha(out, p, x, y, gLayer[size_t(l)], 0, I); }
         for (int c = 0; c < A.colorChannels; ++c) colorTrig(c, A.colorAt[0][size_t(c)], I);
     }
-    double sx = p.trigX; (void)board.nextY();
+    double sx = p.trigX; const double sy = board.nextY();
     detail::addSpawn(out, p, sx, board.rowY(), L, 0, 0);
     if (S.hasI) detail::addSpawn(out, p, sx, board.rowY() + 30.0, I, 0, 0);
+    if (palMode) {                                                     // paleta de canales: un Color trigger por canal, al inicio del nivel (igual que 18/19)
+        for (size_t i = 0; i < A.palette.size(); ++i) {
+            double cx, cy; detail::colorTriggerPos(int(i), p.trigX, sy, cx, cy);
+            detail::addTriggerHead(out, 899, cx, cy);
+            out += ",7,"; out += std::to_string(A.palette[i][0]); out += ",8,"; out += std::to_string(A.palette[i][1]); out += ",9,"; out += std::to_string(A.palette[i][2]);
+            out += ",10,0,35,1,17,0,23,"; out += std::to_string(A.firstChannel + int(i)); out += ';';
+        }
+    }
     detail::triggersFirst(out, objEnd);
     if (!out.empty() && out.back() == ';') out.pop_back();
     return out;

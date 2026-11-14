@@ -20,7 +20,7 @@ struct Ctx {
 inline Ctx makeCtx(const GifData& g, const GifPlan& plan, const Options& base, const LayeredOptions& lo, Progress* prog, int threads) {
     Ctx c; c.N = plan.count(); c.base = base; c.lo = lo; c.prog = prog; c.threads = std::max(1, threads);
     c.thr = std::clamp(base.alphaThreshold, 1, 255); c.tol = std::clamp(lo.tol, 4, 120);
-    c.quality = std::clamp(std::max(base.quality, 1), 0, 3); c.seed = base.seed;
+    c.quality = std::clamp(base.quality, 0, 3); c.seed = base.seed;
     int mr = std::clamp(base.maxRaster, 64, 1024), W, H;
     fitSize(g.w, g.h, mr, W, H);
     while (int64_t(W) * H * c.N > 9000000LL && mr > 64) { mr = int(mr * 0.88); fitSize(g.w, g.h, mr, W, H); }
@@ -152,13 +152,34 @@ struct Refiner {
         }
         return err;
     }
+    static bool covers(const Shape& s, double cs, double sn, int x, int y) {
+        const double dx = x + 0.5 - s.cx, dy = y + 0.5 - s.cy, lx = dx * cs + dy * sn, ly = -dx * sn + dy * cs;
+        return lx >= -s.w * 0.5 - 1e-4 && lx < s.w * 0.5 + 1e-4 && ly >= -s.h * 0.5 - 1e-4 && ly < s.h * 0.5 + 1e-4;
+    }
+    static double errOf(bool targetOpaque, const uint8_t* col, const uint8_t* t) {
+        const double miss = 3.0 * 255.0 * 255.0 * 0.25;
+        if (!targetOpaque) return col ? miss : 0.0;
+        if (!col) return miss;
+        const double d0 = double(t[0]) - col[0], d1 = double(t[1]) - col[1], d2 = double(t[2]) - col[2];
+        return d0 * d0 + d1 * d1 + d2 * d2;
+    }
     // rondas = pasadas completas; `ops` limita el trabajo total (evaluaciones de region) para acotar el tiempo.
+    // v0.5.6: MISMO resultado que la version anterior (misma ganancia exacta por candidato, mismo orden y mismo gasto de `ops`), pero mucho mas rapido:
+    // el error de cada pixel se separa en "tapado por una forma de encima" (no depende de la forma k), "lo que se veria sin k" y "lo que se ve con k",
+    // asi la ganancia de un candidato es solo la suma de delta[p] = errSinK - errConK en los pixeles que cubre, menos lo mismo para la forma actual.
+    // Todo son sumas de enteros (y multiplos de 0.25) exactas en double, asi que el orden de suma no cambia el resultado.
     void run(int rounds, uint32_t seed, long ops) {
         if (sh.empty()) return;
-        std::vector<std::array<int, 4>> bb(sh.size());
-        for (size_t i = 0; i < sh.size(); ++i) bbox(sh[i], W, H, bb[i][0], bb[i][1], bb[i][2], bb[i][3]);
+        const size_t n = sh.size();
+        std::vector<std::array<int, 4>> bb(n); std::vector<double> csv(n), snv(n);
+        auto refresh = [&](size_t i) {
+            bbox(sh[i], W, H, bb[i][0], bb[i][1], bb[i][2], bb[i][3]);
+            const double rad = sh[i].rot * 3.14159265358979323846 / 180.0; csv[i] = std::cos(rad); snv[i] = std::sin(rad);
+        };
+        for (size_t i = 0; i < n; ++i) refresh(i);
         Rng rng(seed);
-        std::vector<size_t> idx(sh.size()); for (size_t i = 0; i < idx.size(); ++i) idx[i] = i;
+        std::vector<size_t> idx(n); for (size_t i = 0; i < idx.size(); ++i) idx[i] = i;
+        std::vector<double> delta; std::vector<size_t> above, below;
         static const double steps[3] = {0.30, 0.12, 0.05};
         for (int rd = 0; rd < rounds && ops > 0; ++rd) {
             for (size_t i = idx.size(); i > 1; --i) std::swap(idx[i - 1], idx[rng.next() % i]);   // orden aleatorio
@@ -174,19 +195,43 @@ struct Refiner {
                 mk(float(st), 0, 0, 0, 0); mk(float(-st), 0, 0, 0, 0); mk(0, float(st), 0, 0, 0); mk(0, float(-st), 0, 0, 0);
                 mk(float(st) * .5f, 0, float(st), 0, 0); mk(float(-st) * .5f, 0, float(st), 0, 0); mk(0, float(st) * .5f, 0, float(st), 0); mk(0, float(-st) * .5f, 0, float(st), 0);
                 if (rotated) { mk(0, 0, 0, 0, float(4.0 * stf / 0.3)); mk(0, 0, 0, 0, float(-4.0 * stf / 0.3)); }
-                // las que encogen: la mitad de los casos (mismo desplazamiento con tamano menor)
-                int x0, y0, x1, y1; bbox(cur, W, H, x0, y0, x1, y1);
-                double bestErr = -1, bestGain = 0; int bestI = -1;
-                const double e0 = evalRegion(k, cur, x0, y0, x1, y1, bb); --ops;
-                for (int ci = 0; ci < nc; ++ci) {
-                    int cx0, cy0, cx1, cy1; bbox(cands[ci], W, H, cx0, cy0, cx1, cy1);
-                    const int ux0 = std::min(x0, cx0), uy0 = std::min(y0, cy0), ux1 = std::max(x1, cx1), uy1 = std::max(y1, cy1);
-                    const double a = evalRegion(k, cur, ux0, uy0, ux1, uy1, bb), b = evalRegion(k, cands[ci], ux0, uy0, ux1, uy1, bb); ops -= 2;
-                    const double gain = a - b;
-                    if (gain > bestGain) { bestGain = gain; bestI = ci; bestErr = b; }
+                int x0 = bb[k][0], y0 = bb[k][1], x1 = bb[k][2], y1 = bb[k][3];
+                --ops;
+                // region que tocan la forma actual y todos los candidatos
+                int rx0 = x0, ry0 = y0, rx1 = x1, ry1 = y1; std::array<int, 4> cb[10];
+                for (int ci = 0; ci < nc; ++ci) { bbox(cands[ci], W, H, cb[ci][0], cb[ci][1], cb[ci][2], cb[ci][3]); rx0 = std::min(rx0, cb[ci][0]); ry0 = std::min(ry0, cb[ci][1]); rx1 = std::max(rx1, cb[ci][2]); ry1 = std::max(ry1, cb[ci][3]); }
+                const int rw = rx1 - rx0 + 1, rh = ry1 - ry0 + 1;
+                double bestGain = 0; int bestI = -1;
+                if (rw > 0 && rh > 0) {
+                    above.clear(); below.clear();
+                    for (size_t i = 0; i < n; ++i) {
+                        if (i == k) continue; const auto& b = bb[i];
+                        if (b[2] < rx0 || b[0] > rx1 || b[3] < ry0 || b[1] > ry1) continue;
+                        (i > k ? above : below).push_back(i);
+                    }
+                    delta.assign(size_t(rw) * size_t(rh), 0.0);
+                    for (int y = ry0; y <= ry1; ++y) for (int x = rx0; x <= rx1; ++x) {
+                        bool ab = false;
+                        for (size_t q = above.size(); q-- > 0;) if (covers(sh[above[q]], csv[above[q]], snv[above[q]], x, y)) { ab = true; break; }
+                        if (ab) continue;
+                        const uint8_t* colB = nullptr;
+                        for (size_t q = below.size(); q-- > 0;) if (covers(sh[below[q]], csv[below[q]], snv[below[q]], x, y)) { colB = &sh[below[q]].r; break; }
+                        if (!colB && under) { const uint8_t* u = under->at(x, y); if (u[3] > 0) colB = u; }
+                        const uint8_t* t = tg.at(x, y); const bool to = t[3] >= thr;
+                        delta[size_t(y - ry0) * size_t(rw) + size_t(x - rx0)] = errOf(to, colB, t) - errOf(to, &cur.r, t);
+                    }
+                    double sCur = 0;
+                    for (int y = y0; y <= y1; ++y) for (int x = x0; x <= x1; ++x) if (covers(cur, csv[k], snv[k], x, y)) sCur += delta[size_t(y - ry0) * size_t(rw) + size_t(x - rx0)];
+                    for (int ci = 0; ci < nc; ++ci) {
+                        const double rad = cands[ci].rot * 3.14159265358979323846 / 180.0, cs = std::cos(rad), sn = std::sin(rad);
+                        double sCand = 0;
+                        for (int y = cb[ci][1]; y <= cb[ci][3]; ++y) for (int x = cb[ci][0]; x <= cb[ci][2]; ++x) if (covers(cands[ci], cs, sn, x, y)) sCand += delta[size_t(y - ry0) * size_t(rw) + size_t(x - rx0)];
+                        const double gain = sCand - sCur;
+                        if (gain > bestGain) { bestGain = gain; bestI = ci; }
+                    }
                 }
-                (void)e0; (void)bestErr;
-                if (bestI >= 0 && bestGain > 1.0) { sh[k] = cands[bestI]; bbox(sh[k], W, H, bb[k][0], bb[k][1], bb[k][2], bb[k][3]); }
+                ops -= 2L * nc;
+                if (bestI >= 0 && bestGain > 1.0) { sh[k] = cands[bestI]; refresh(k); }
             }
         }
     }
@@ -312,13 +357,35 @@ inline VariantPlan planVariants(const Ctx& c, const std::vector<Region>& regs, c
             }
             return un ? double(bad) / double(un) : 0.0;
         };
+        // Igual que dist(), pero se detiene en cuanto la fraccion de pixeles distintos ya supera `lim` (el total de la union se calcula antes, asi la
+        // decision d <= lim es exactamente la misma que con la suma completa). Devuelve 2 si supera el limite.
+        auto distLim = [&](int i, int j, double lim) {
+            const std::vector<uint8_t>& ai = D.app[size_t(i)]; const std::vector<uint8_t>& aj = D.app[size_t(j)];
+            const bool hb = base && base->of[size_t(i)] >= 0;
+            size_t un = 0; for (size_t p = 0; p < np; p += step) un += (ai[p] | aj[p]) ? 1u : 0u;
+            if (un == 0) return 0.0;
+            const size_t cutoff = lim >= 1.0 ? un : size_t(std::max(0.0, std::floor(lim * double(un)) - 1.0));
+            size_t bad = 0;
+            for (size_t p = 0; p < np; p += step) {
+                if (!ai[p] && !aj[p]) continue;
+                const uint8_t* ci = &D.cs[size_t(i)].rgba[p * 4];
+                const uint8_t* want = ai[p] ? ci : (hb ? &D.cb[size_t(i)].rgba[p * 4] : ci);
+                const uint8_t* got = aj[p] ? &D.cs[size_t(j)].rgba[p * 4] : (hb ? &D.cb[size_t(i)].rgba[p * 4] : ci);
+                if (lay::pixDiff(want, got, c.thr) > c.tol) { ++bad; if (bad > cutoff && double(bad) / double(un) > lim) return 2.0; }
+            }
+            return double(bad) / double(un);
+        };
         std::vector<VariantPlan::Var>& vs = parts[size_t(r)].vars.emplace_back();
         vs.clear();
         std::vector<int>& vo = parts[size_t(r)].varOf.emplace_back(size_t(N), -1);
         for (int i = 0; i < N; ++i) {
             if (cnt(D.app[size_t(i)]) == 0) continue;
             int best = -1; double bd = theta;
-            for (size_t v = 0; v < vs.size(); ++v) { double d = std::max(dist(i, vs[v].rep), dist(vs[v].rep, i)); if (d <= bd) { bd = d; best = int(v); } }
+            for (size_t v = 0; v < vs.size(); ++v) {
+                const double d1 = distLim(i, vs[v].rep, bd); if (d1 > bd) continue;
+                const double d2 = distLim(vs[v].rep, i, bd); if (d2 > bd) continue;
+                const double d = std::max(d1, d2); if (d <= bd) { bd = d; best = int(v); }
+            }
             if (best < 0) { VariantPlan::Var nv; nv.rep = i; nv.frames.push_back(i); vs.push_back(std::move(nv)); vo[size_t(i)] = int(vs.size()) - 1; }
             else { vs[size_t(best)].frames.push_back(i); vo[size_t(i)] = best; }
         }

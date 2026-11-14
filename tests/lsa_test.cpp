@@ -8,6 +8,7 @@
 #include "gdsim.hpp"
 #include <fstream>
 #include <iostream>
+#include <set>
 int main(int argc, char** argv) {
     std::ifstream f(argc > 1 ? argv[1] : "tests/test.gif", std::ios::binary);
     std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)), {});
@@ -59,6 +60,27 @@ int main(int argc, char** argv) {
             if (A.lsa && A.lsa->colorChannels == 0 && std::abs(std::min(60.0, simAvg) - std::min(60.0, A.psnrAvg)) > 2.5) fail(k, "PSNR simulado " + std::to_string(simAvg) + " dB muy distinto del calculado " + std::to_string(A.psnrAvg));
             std::printf("  metodo %d: obj=%zu trig=%zu capas=%zu PSNR calc %.1f / sim %.1f  (%s)\n", 19 + k, objs, trig, A.lsa->layers.size(), A.psnrAvg, simAvg, A.note.c_str());
         }
+    }
+    // modo canales (sin HSV): la paleta necesita un Color trigger por canal (v0.5.6: faltaban en 20-29)
+    for (int k = 1; k <= 10; ++k) {
+        Options o; o.maxRaster = 160; o.quality = 1; o.budget = per;
+        LayeredOptions lo; lo.perFrame = per; lo.method = k; lo.maxTotal = per * N + 600; lo.channels = 64; lo.firstChannel = 2;
+        LayeredAnim A = buildAnim(g, plan, o, lo, nullptr, 2);
+        if (!A.ok() || !A.lsa) continue;
+        GifExportParams p; p.baseGroup = 10; p.eo.longSide = 300; p.eo.originX = 1000; p.eo.originY = 500; std::string err;
+        std::string s = buildAnimString(A, plan, p, &err);
+        if (s.empty()) { fail(k, "canales: cadena vacia: " + err); continue; }
+        size_t colTrig = 0, withCh = 0; std::set<int> usedCh, trigCh;
+        for (auto& kv : parse(s)) {
+            if (!kv.count(1)) continue; int id = std::stoi(kv.at(1));
+            if (id == 899 && kv.count(23)) { ++colTrig; trigCh.insert(std::stoi(kv.at(23))); }
+            if (id == 3092 && kv.count(21)) { ++withCh; usedCh.insert(std::stoi(kv.at(21))); if (std::stoi(kv.at(21)) == 1) fail(k, "canales: se uso el canal 1"); }
+        }
+        ++checks;
+        if (withCh == 0) fail(k, "canales: ningun objeto usa canal");
+        for (int ch : usedCh) if (!trigCh.count(ch)) { fail(k, "canales: el canal " + std::to_string(ch) + " se usa pero ningun Color trigger lo fija"); break; }
+        if (int(colTrig) < int(usedCh.size())) fail(k, "canales: faltan Color triggers");
+        std::printf("  canales metodo %d: %zu canales usados, %zu Color triggers\n", 19 + k, usedCh.size(), colTrig);
     }
     std::cout << checks << " metodos comprobados: " << (bad ? std::to_string(bad) + " FALLOS\n" : std::string("TODO OK\n"));
     return bad ? 1 : 0;

@@ -1,3 +1,28 @@
+# v0.5.6-beta
+- **Metodos 20-29 con "Canales (sin HSV)": faltaban los Color triggers.** El exportador de las capas LSA no emitia los Color triggers de la paleta (los objetos usaban canales que nadie coloreaba:
+  en el simulador 7,3 dB, es decir, imagen sin color). Ahora se colocan igual que en 18/19 (uno por canal, a la izquierda del inicio, cuadricula compacta) y se cuentan en el tope de objetos.
+  Prueba nueva en `tests/lsa_test.cpp` (cada canal usado tiene su Color trigger; el canal 1 nunca se usa): falla con la 0.5.5 y pasa ahora.
+- **Metodo 26 rehecho: teselado espacio-temporal.** Antes: k-means por pixel + descomposicion golosa del mapa de etiquetas = miles de rectangulos finos (las "rayas"), colores mezclados y 9000 objetos.
+  Ahora (`engine/lsa_stt.hpp`): (1) BSP cuyo error se mide en TODOS los frames a la vez (imagenes integrales por frame): las hojas son rectangulos exactos que tapizan el lienzo sin huecos ni solapes;
+  (2) las trayectorias de color de las hojas se agrupan en K canales (k-means ponderado por area; el color de cada canal en cada frame es la media ponderada: optimo en minimos cuadrados);
+  (3) hojas hermanas con el mismo canal se fusionan. El numero de rectangulos y de canales lo elige un modelo de coste (objetos + Color triggers) y se queda con el plan MAS BARATO a menos de 1 dB del mejor
+  posible (0,7 dB con duracion Alto, 0,4 con Maximo): no gasta objetos que no mejoran la imagen. Medido contra la 0.5.5: ciclos de color igual de exactos (31,5 dB); GIF con movimiento +0,7 a +10 dB (rebote 31,9 -> 41,8 dB).
+  Los Color triggers lanzados por spawn ahora van en una cuadricula compacta (40 columnas) en vez de una fila de decenas de miles de unidades.
+- **Metodos 20 y 27 (vidas de formas): frames sueltos a 13-17 dB.** Una forma "seguia valiendo" solo si su error frente al frame era pequeno; una forma ya aproximada marcaba casi toda la imagen como mala,
+  moria en el frame siguiente aunque no cambiara nada y el frame se quedaba con 4 formas gigantes encima. Ahora vale mientras el CONTENIDO bajo ella no cambie respecto al frame donde nacio, lo que hay que
+  repintar es solo lo cambiado + lo no cubierto, y el presupuesto se reparte a densidad uniforme sobre el area que falta. Frame peor: 13,3 -> 21,3 dB (media 20,9 -> 22,4 dB). Ademas, si la estructura gasta
+  mas del 9 % del presupuesto en triggers, las vidas se alargan.
+- **Mas rapido SIN cambiar el resultado** (comprobado con un hash de la cadena de GD entera: identica a la 0.5.5 en 7, 8, 18-25, 27 y 29 con calidad Rapido/Normal/Alto, HSV y canales):
+  - `Geo::eval` (rectangulos girados: 7, 8 y 18-29) suma por filas con prefijos en vez de pixel a pixel (sumas enteras exactas).
+  - Optimizador por forma (23 y 27): la ganancia de cada candidato se calcula una vez por pixel y forma en lugar de re-dibujar toda la region por candidato: 23 pasa de 27,9 s a 5,9 s y 27 de 16,6 s a 3,8 s (catgirl 36 frames, 800 obj/frame).
+  - Comparacion de variantes (21, 22, 25, 29) con salida anticipada exacta, `renderShapes` con camino rapido para rectangulos sin giro y mediana 3x3 por insercion.
+  - Resto de metodos: 1,2x - 1,6x mas rapidos (18: 2,0 -> 1,6 s; 21: 3,6 -> 2,3 s; 22: 2,8 -> 1,9 s).
+- **Nuevo ajuste "Duracion de calculo (metodos 18-29)"**: Rapido / Normal / Alto / Maximo. Normal = el resultado de siempre (mismo hash). Rapido acorta la busqueda de cada objeto (~1,15x-1,35x mas rapido,
+  ~0,1-0,3 dB menos), Alto y Maximo buscan mas (~1,4x-2x mas lento, ~+0,1-0,4 dB). "Calidad de calculo" queda solo para 7 y 8. El 28 (Auto) no prueba el optimizador (23) con Rapido.
+- Aviso: "Quitar ruido del GIF" (mediana 3x3) es un tope de calidad en pixel art (borra detalles de 1 px): en el GIF de la catgirl, desactivarlo sube el 26 de 25 a 31 dB y el 18 de 24 a 28 dB.
+- Pruebas nuevas: `tests/bench_lsa.cpp` (tiempo, PSNR y hash por metodo/ajuste). `tests/dispatch.hpp`: variable CHANNELS=1 para probar el modo canales.
+- NO verificado en GD real: nada de esto (el simulador es mi modelo de GD).
+
 # v0.5.5-beta
 - **Metodos 18 y 19 arreglados con GIFs largos.** Con mas de 40 capas el esquema de diferencias no se autocorregia: un trigger perdido dejaba capas colgadas (con 48-100 frames,
   33-63 % de las muestras con fallos en el modelo hostil). Ahora cada paso reafirma el estado ACTUAL de todas las capas que cambiaron en los ultimos 3 pasos y se lanza dos veces:
