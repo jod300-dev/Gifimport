@@ -19,7 +19,15 @@
 // ============================================================================
 #pragma once
 #include "lsa_core.hpp"
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <cstring>
 #include <functional>
+#include <map>
+#include <queue>
+#include <set>
+#include <vector>
 
 namespace gdx {
 namespace lsa {
@@ -157,8 +165,8 @@ inline double wkmeans(const WPoints& P, int K, uint32_t seed, int iters, std::ve
         for (int l = 0; l < L; ++l) { const int k = as[size_t(l)]; cw[size_t(k)] += P.w[size_t(l)]; for (size_t t = 0; t < D; ++t) acc[size_t(k) * D + t] += P.w[size_t(l)] * P.m[size_t(l) * D + t]; }
         for (int k = 0; k < K; ++k) {
             if (cw[size_t(k)] > 0) for (size_t t = 0; t < D; ++t) cen[size_t(k) * D + t] = float(acc[size_t(k) * D + t] / cw[size_t(k)]);
-            else { int far = 0; double bw = -1; for (int l = 0; l < L; ++l) if (dmin[size_t(l)] * P.w[size_t(l)] > bw) { bw = dmin[size_t(l)] * P.w[size_t(l)]; far = l; }     // cluster vacio: se re-siembra en el punto peor servido
-                   std::memcpy(&cen[size_t(k) * D], &P.m[size_t(far) * D], D * sizeof(float)); dmin[size_t(far)] = 0; }
+            else { int worst = 0; double bw = -1; for (int l = 0; l < L; ++l) if (dmin[size_t(l)] * P.w[size_t(l)] > bw) { bw = dmin[size_t(l)] * P.w[size_t(l)]; worst = l; }     // cluster vacio: se re-siembra en el punto peor servido
+                   std::memcpy(&cen[size_t(k) * D], &P.m[size_t(worst) * D], D * sizeof(float)); dmin[size_t(worst)] = 0; }
         }
     }
     // asignacion final y error con los centroides definitivos
@@ -180,9 +188,7 @@ inline bool buildColorAnim(const Ctx& c, LsaAnim& A) {
     if (int64_t(W) * H * N > 4000000LL) { const double f = std::sqrt(4000000.0 / (double(W) * H * N)); aw = std::max(8, int(W * f)); ah = std::max(8, int(H * f)); }
     std::vector<Image> src; const std::vector<Image>* use = &c.fr;
     if (aw != W || ah != H) { src.resize(size_t(N)); for (int i = 0; i < N; ++i) src[size_t(i)] = resizeArea(c.fr[size_t(i)], aw, ah); use = &src; }
-    const bool dbg = getenv("STT_DEBUG") != nullptr; double t0 = nowMs();
     SttVolume vol; vol.build(*use, aw, ah);
-    if (dbg) std::fprintf(stderr, "[stt] integrales %.0fms (%dx%d)\n", nowMs() - t0, aw, ah);
     report(c.prog, 0.15f);
 
     const long total = c.total;
@@ -191,7 +197,6 @@ inline bool buildColorAnim(const Ctx& c, LsaAnim& A) {
     SttTree tree; tree.build(vol, int(std::min<long>(B, long(aw) * ah)), c.prog);
     if (isCancelled(c.prog)) return false;
     report(c.prog, 0.55f);
-    if (dbg) std::fprintf(stderr, "[stt] bsp %.0fms hojas %d\n", nowMs() - t0, tree.leafCount());
     const int Lmax = tree.leafCount();
     const double nPix = double(aw) * ah;
 
@@ -200,7 +205,6 @@ inline bool buildColorAnim(const Ctx& c, LsaAnim& A) {
         P.L = int(leaves.size()); P.D = N * 3; P.m.assign(size_t(P.L) * size_t(P.D), 0.f); P.w.assign(size_t(P.L), 0.0);
         for (int l = 0; l < P.L; ++l) { const SttNode& n = tree.nd[size_t(leaves[size_t(l)])]; vol.mean(n.x0, n.y0, n.x1, n.y1, &P.m[size_t(l) * size_t(P.D)]); P.w[size_t(l)] = double(n.x1 - n.x0) * (n.y1 - n.y0); }
     };
-    auto ebsp = [&](const std::vector<int>& leaves) { double e = 0; for (int i : leaves) e += tree.nd[size_t(i)].err; return e; };
 
     // eleccion de (hojas S, canales K) con un modelo de coste. Error total = error del BSP con S hojas (acumulado de las ganancias de cada corte)
     // + error de fusionar las trayectorias en K canales (medido sobre un conjunto de hojas de referencia). Coste = S + K*N (peor caso: todos los canales
@@ -246,12 +250,10 @@ inline bool buildColorAnim(const Ctx& c, LsaAnim& A) {
     }
     report(c.prog, 0.7f);
     if (plans.empty()) { A.note = "No se pudo calcular el metodo"; return false; }
-    if (dbg) for (const Plan& p : plans) std::fprintf(stderr, "   plan K=%d S=%d coste %.0f psnr %.2f\n", p.K, p.S, p.cost, p.psnr);
     const double tol = c.quality >= 3 ? 0.4 : c.quality == 2 ? 0.7 : 1.0;
     const double target = std::min(bestPsnr, 42.0) - tol;
     Plan pick = plans.front(); double bc = 1e300;
     for (const Plan& p : plans) if (p.psnr >= target && p.cost < bc) { bc = p.cost; pick = p; }
-    if (dbg) std::fprintf(stderr, "[stt] mejor PSNR modelo %.2f, elegido K=%d S=%d psnr %.2f coste %.0f  (%.0fms)\n", bestPsnr, pick.K, pick.S, pick.psnr, pick.cost, nowMs() - t0);
 
     const int K = pick.K;
     std::vector<float> cen; std::vector<int> as; std::vector<int> leaves; WPoints P;

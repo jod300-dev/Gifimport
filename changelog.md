@@ -1,4 +1,5 @@
 # v0.5.6-beta
+- **Arreglo de compilacion en Windows**: en `lsa_stt.hpp` una variable se llamaba `far`, que `windows.h` define como macro vacia (error `expected unqualified-id`); renombrada. Quitado tambien el `getenv` de depuracion (aviso de MSVC). Probado ademas compilando con `-Dfar= -Dnear= -std=c++23`.
 - **Metodos 20-29 con "Canales (sin HSV)": faltaban los Color triggers.** El exportador de las capas LSA no emitia los Color triggers de la paleta (los objetos usaban canales que nadie coloreaba:
   en el simulador 7,3 dB, es decir, imagen sin color). Ahora se colocan igual que en 18/19 (uno por canal, a la izquierda del inicio, cuadricula compacta) y se cuentan en el tope de objetos.
   Prueba nueva en `tests/lsa_test.cpp` (cada canal usado tiene su Color trigger; el canal 1 nunca se usa): falla con la 0.5.5 y pasa ahora.
