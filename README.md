@@ -131,3 +131,22 @@ Es un **modelo** (no GD real): lo que no puede comprobar esta en "NO verificado"
 
 ## Herramienta: ver un .gmd sin abrir GD
 `python3 tools/gmd_view.py nivel.gmd` resume el nivel (objetos por id, z-orders, ¿hay z=0?, orden de los triggers) y con `-o vista.png [--group N] [--zero-default 12]` dibuja los objetos 3092 del mod. Exporta el nivel desde GD (.gmd) y subelo para diagnosticar.
+
+## Metodos 20-29 (capas LSA)
+Todos comparten el mismo exportador (`src/engine/lsa_export.hpp`): la animacion es un conjunto de capas y, por frame, las capas visibles. Los pasos son Alpha absolutos
+(idempotentes), se lanzan dos veces y reafirman los ultimos cambios, asi que un trigger perdido se repara solo.
+
+| N | Nombre | Cuando gana |
+|---|--------|-------------|
+| 20 | Vidas de formas | movimientos lentos o pequenos (cada forma vive mientras valga) |
+| 21 | Biblioteca de teselas | bucles, ping-pong, partes que se repiten |
+| 22 | Keyframes + residuos | fondo casi fijo con cosas que se mueven (mitad de objetos) |
+| 23 | Optimizador por forma | cuando manda la calidad y el GIF se mueve entero (lento) |
+| 24 | Reparto RD + repetidos | frames repetidos o muy distintos en dificultad |
+| 25 | Fondo + regiones | personaje/objeto sobre fondo fijo (el mejor ahorro) |
+| 26 | Animacion por colores | destellos, brillos, ciclos de color sin movimiento |
+| 27 | Vidas + optimizador | como 20 con mas calidad por objeto |
+| 28 | Auto | no sabes cual usar: prueba varios y elige (lento) |
+| 29 | Cuadtree temporal | zonas quietas grandes y movimiento localizado |
+
+Pruebas: `python3 tests/gen_corpus.py && tests/run_corpus.sh corpus 250 res.txt 250 2 17 18 19 20 21 22 23 24 25 26 27 28` (repetir hasta completar; `corpus_test <gif> <metodo> <obj/frame> <maxFrames>` para uno).

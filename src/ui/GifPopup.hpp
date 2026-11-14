@@ -83,6 +83,7 @@ protected:
     static constexpr int kTreeIndex = kLayeredIndex + 1;               // 19: arbol de deltas
     bool layered() const { return m_method >= kLayeredIndex; }         // 18 y 19 comparten el flujo por capas
     bool treeMode() const { return m_method == kTreeIndex; }
+    int lsaKind() const { return m_method > kTreeIndex ? m_method - kTreeIndex : 0; }   // 1..10 = metodos 20..29
     gdx::Method method() const { return layered() ? gdx::Method::BSP : gdx::Method(m_method); }
     gdx::LayeredOptions makeLayeredOptions() const;
     std::string layeredKey() const;

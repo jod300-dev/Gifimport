@@ -70,8 +70,8 @@ struct Sim {
         objs = parse(chain);
         for (size_t i = 0; i < objs.size(); ++i) {
             const Obj& o = objs[i];
-            if (o.id == 899) chColor[int(o.geti(23))] = {uint8_t(o.geti(7)), uint8_t(o.geti(8)), uint8_t(o.geti(9))};
-            if ((o.id == 1007 || o.id == 1268) && o.has(62)) for (int g : o.groups) trigsIn[g].push_back(int(i));
+            if (o.id == 899 && !o.has(62)) chColor[int(o.geti(23))] = {uint8_t(o.geti(7)), uint8_t(o.geti(8)), uint8_t(o.geti(9))};   // Color trigger de arranque
+            if ((o.id == 1007 || o.id == 1268 || o.id == 899) && o.has(62)) for (int g : o.groups) trigsIn[g].push_back(int(i));
         }
         // triggers de posicion: se ejecutan al empezar (t=0), de izquierda a derecha
         std::vector<int> pos;
@@ -102,6 +102,9 @@ struct Sim {
                     if (ob.id == 1007) {
                         if (spawnTriggered && opt.dropAlpha > 0 && U(rng) < opt.dropAlpha) continue;     // este Alpha se pierde
                         opacity[target] = int(ob.geti(35, 1));
+                    } else if (ob.id == 899) {                                                                // Color trigger spawn-triggered: color absoluto del canal
+                        if (spawnTriggered && opt.dropAlpha > 0 && U(rng) < opt.dropAlpha) continue;
+                        chColor[int(ob.geti(23))] = {uint8_t(ob.geti(7)), uint8_t(ob.geti(8)), uint8_t(ob.geti(9))};
                     } else if (ob.id == 1268) {
                         const bool selfLoop = std::find(ob.groups.begin(), ob.groups.end(), target) != ob.groups.end();   // Spawn(L, total): no se pierde
                         if (spawnTriggered && !selfLoop && opt.dropSpawn > 0 && U(rng) < opt.dropSpawn) continue;

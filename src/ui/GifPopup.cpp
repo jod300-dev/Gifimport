@@ -11,7 +11,7 @@ namespace {
     constexpr float kPopupW = 430.f, kPopupH = 290.f;
     constexpr float kPrevSize = 140.f;
     constexpr int kMethodCount = int(gdx::Method::Ascii);          // metodos 1-17 (el ASCII no sirve para animar)
-    constexpr int kMethodTotal = kMethodCount + 2;                 // + metodo 18 (capas) y 19 (arbol de deltas)
+    constexpr int kMethodTotal = kMethodCount + 2 + 10;            // + metodo 18 (capas), 19 (arbol de deltas) y 20-29 (capas LSA)
     constexpr int kMinPF = 10, kMaxPF = 5000;                      // objetos por frame
     constexpr int kMinFrames = 2, kMaxFrames = 300;
     constexpr int kMinSize = 150, kMaxSize = 6000;
@@ -257,8 +257,13 @@ bool GifPopup::init(EditorUI* editor) {
 
 void GifPopup::refreshLabels() {
     if (layered()) {
-        m_methodLabel->setString(treeMode() ? gdx::treeName() : gdx::layeredName());
-        m_descLabel->setString(treeMode() ? gdx::treeDesc() : gdx::layeredDesc());
+        if (lsaKind() > 0) {
+            m_methodLabel->setString(gdx::lsa::methodName(lsaKind()));
+            m_descLabel->setString(gdx::lsa::methodDesc(lsaKind()));
+        } else {
+            m_methodLabel->setString(treeMode() ? gdx::treeName() : gdx::layeredName());
+            m_descLabel->setString(treeMode() ? gdx::treeDesc() : gdx::layeredDesc());
+        }
     } else {
         auto const& info = gdx::methodInfo(method());
         m_methodLabel->setString(info.name);
@@ -449,6 +454,7 @@ gdx::LayeredOptions GifPopup::makeLayeredOptions() const {
     gdx::LayeredOptions lo;
     lo.perFrame = m_perFrame;
     lo.tree = treeMode();
+    lo.method = lsaKind();                                          // 0 = metodos 18/19; 1..10 = metodos 20..29
     lo.maxTotal = maxTotal();
     lo.tol = std::clamp(int(mod->getSettingValue<int>("layered-tolerance")), 8, 80);
     lo.denoise = mod->getSettingValue<bool>("layered-denoise");
@@ -474,6 +480,7 @@ std::string GifPopup::layeredKey() const {
     key += std::to_string(mod->getSettingValue<double>("layered-reuse"));
     key += "|" + mod->getSettingValue<std::string>("quality");
     key += treeMode() ? "|T" : "|L";
+    key += "|M" + std::to_string(lsaKind());
     key += m_chan ? "|c" : "|h";
     key += std::to_string(paletteSize());
     return key;
@@ -591,7 +598,9 @@ void GifPopup::applyPreview(std::shared_ptr<PreviewJob> job) {
         size_t objs = A.objectCount() + size_t(gdx::animTriggerCount(A));
         char a2[96], b2[96];
         std::snprintf(a2, sizeof a2, "%d frames | %zu objetos", A.frames, objs);
-        if (!A.palette.empty())
+        if (A.lsa)
+            std::snprintf(b2, sizeof b2, "%d capas | %.1f dB | %.1f s", int(A.lsa->layers.size()), A.psnrAvg, m_layeredPlan.total);
+        else if (!A.palette.empty())
             std::snprintf(b2, sizeof b2, "%s | %.1f dB | canales %d-%d", A.tree ? "arbol" : "rests", A.psnrAvg, A.firstChannel, A.firstChannel + int(A.palette.size()) - 1);
         else if (A.tree)
             std::snprintf(b2, sizeof b2, "arbol prof. %d | %.1f dB | %.1f s", A.depthMax, A.psnrAvg, m_layeredPlan.total);

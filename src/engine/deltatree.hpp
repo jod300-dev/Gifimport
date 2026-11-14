@@ -12,6 +12,7 @@
 #include <cstdio>
 #include <set>
 #include "layered.hpp"
+#include "lsa_methods.hpp"
 
 namespace gdx {
 namespace tree {
@@ -46,6 +47,7 @@ struct Sched {
     std::vector<int> layerOf;                             // frame -> su propia capa (el mismo indice) o -1 si la delta esta vacia
     int nLayers = 0, nSteps = 0, groups = 0, triggers = 0;
     bool full = false;                                    // cada paso fija el estado COMPLETO (ver kFullStateMaxLayers en layered.hpp)
+    std::vector<std::vector<int>> heal;                   // (!full) por paso: capas a reafirmar (ver healSets)
 };
 
 inline Sched schedule(const LayeredAnim& a) {
@@ -82,8 +84,14 @@ inline Sched schedule(const LayeredAnim& a) {
     const bool hasI = !s.initHide.empty();
     s.full = s.nLayers <= kFullStateMaxLayers;
     if (s.full) acts = s.nSteps * s.nLayers;                                 // cota: una Alpha por capa y paso
+    else {
+        std::vector<std::vector<int>> changed; changed.resize(size_t(N));
+        for (int i = 0; i < N; ++i) { changed[size_t(i)] = s.hide[size_t(i)]; changed[size_t(i)].insert(changed[size_t(i)].end(), s.show[size_t(i)].begin(), s.show[size_t(i)].end()); }
+        s.heal = healSets(changed, kHealWindow);
+        acts = 0; for (auto& h : s.heal) acts += int(h.size());
+    }
     s.groups = s.nLayers + s.nSteps + 1 + (hasI ? 1 : 0);
-    s.triggers = s.nSteps + (s.full ? s.nSteps : 0) + 1 + acts + int(s.initHide.size()) + 1 + (hasI ? 2 : 0) + int(a.palette.size());
+    s.triggers = 2 * s.nSteps + 1 + acts + int(s.initHide.size()) + 1 + (hasI ? 2 : 0) + int(a.palette.size());
     return s;
 }
 
@@ -337,9 +345,8 @@ inline std::string buildTreeString(const LayeredAnim& a, const GifPlan& plan, co
         if (gStep[size_t(i)] > 0) { posS(x, y); detail::addSpawn(out, p, x, y, gStep[size_t(i)], t, L); }
         t += plan.delay[size_t(i)];
     }
-    if (S.full)                                                 // segunda ejecucion (idempotente) de cada paso
-        for (int i = 0; i < N; ++i)
-            if (gStep[size_t(i)] > 0) { posS(x, y); detail::addSpawn(out, p, x, y, gStep[size_t(i)], tStart[size_t(i)] + reassertDelay(plan.delay[size_t(i)]), L); }
+    for (int i = 0; i < N; ++i)                                 // segunda ejecucion (idempotente) de cada paso
+        if (gStep[size_t(i)] > 0) { posS(x, y); detail::addSpawn(out, p, x, y, gStep[size_t(i)], tStart[size_t(i)] + reassertDelay(plan.delay[size_t(i)]), L); }
     posS(x, y); detail::addSpawn(out, p, x, y, L, plan.total, L);
     if (hasI) { posS(x, y); detail::addSpawn(out, p, x, y, I, 0, L); }     // autocorreccion en cada vuelta
     board.newBlock();
@@ -351,8 +358,11 @@ inline std::string buildTreeString(const LayeredAnim& a, const GifPlan& plan, co
             for (int l = 0; l < N; ++l) if (S.layerOf[size_t(l)] >= 0 && !vis.count(l)) { posA(x, y); detail::addAlpha(out, p, x, y, gLayer[size_t(l)], 0, F); }
             continue;
         }
-        for (int l : S.hide[size_t(i)]) { posA(x, y); detail::addAlpha(out, p, x, y, gLayer[size_t(l)], 0, F); }
-        for (int l : S.show[size_t(i)]) { posA(x, y); detail::addAlpha(out, p, x, y, gLayer[size_t(l)], 1, F); }
+        {   // muchas capas: reafirmar el estado actual de las capas tocadas en los ultimos pasos
+            std::set<int> vis(S.path[size_t(i)].begin(), S.path[size_t(i)].end());
+            for (int l : S.heal[size_t(i)]) if (vis.count(l)) { posA(x, y); detail::addAlpha(out, p, x, y, gLayer[size_t(l)], 1, F); }
+            for (int l : S.heal[size_t(i)]) if (!vis.count(l)) { posA(x, y); detail::addAlpha(out, p, x, y, gLayer[size_t(l)], 0, F); }
+        }
     }
     board.newBlock();
     if (hasI) for (int l : S.initHide) { posA(x, y); detail::addAlpha(out, p, x, y, gLayer[size_t(l)], 0, I); }
@@ -429,14 +439,19 @@ inline void capAnim(LayeredAnim& A, int maxTotal) {
 }
 
 inline LayeredAnim buildAnim(const GifData& g, const GifPlan& plan, const Options& base, const LayeredOptions& lo, Progress* prog, int threads) {
+    if (lo.method > 0) return buildLsaAnim(g, plan, base, lo, prog, threads);          // metodos 20-29 (cierre y tope de objetos incluidos)
     LayeredAnim A = lo.tree ? buildTree(g, plan, base, lo, prog, threads) : buildLayered(g, plan, base, lo, prog, threads);
     capAnim(A, lo.maxTotal);
     return A;
 }
-inline Result animFrameResult(const LayeredAnim& a, int f) { return a.tree ? treeFrameResult(a, f) : layeredFrameResult(a, f); }
-inline int animTriggerCount(const LayeredAnim& a) { return a.tree ? tree::schedule(a).triggers : layeredTriggerCount(a); }
-inline int animGroupCount(const LayeredAnim& a) { return a.tree ? tree::schedule(a).groups : layeredGroupCount(a); }
+inline Result animFrameResult(const LayeredAnim& a, int f) {
+    if (a.lsa) { const lsa::Sched S = lsa::schedule(*a.lsa); return lsa::frameResult(*a.lsa, S, std::clamp(f, 0, a.lsa->frames - 1)); }
+    return a.tree ? treeFrameResult(a, f) : layeredFrameResult(a, f);
+}
+inline int animTriggerCount(const LayeredAnim& a) { if (a.lsa) return lsaTriggerCount(*a.lsa); return a.tree ? tree::schedule(a).triggers : layeredTriggerCount(a); }
+inline int animGroupCount(const LayeredAnim& a) { if (a.lsa) return lsaGroupCount(*a.lsa); return a.tree ? tree::schedule(a).groups : layeredGroupCount(a); }
 inline std::string buildAnimString(const LayeredAnim& a, const GifPlan& plan, const GifExportParams& p, std::string* err = nullptr) {
+    if (a.lsa) return buildLsaString(*a.lsa, plan, p, err);
     return a.tree ? buildTreeString(a, plan, p, err) : buildLayeredString(a, plan, p, err);
 }
 

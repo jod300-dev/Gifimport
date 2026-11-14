@@ -1,3 +1,20 @@
+# v0.5.5-beta
+- **Metodos 18 y 19 arreglados con GIFs largos.** Con mas de 40 capas el esquema de diferencias no se autocorregia: un trigger perdido dejaba capas colgadas (con 48-100 frames,
+  33-63 % de las muestras con fallos en el modelo hostil). Ahora cada paso reafirma el estado ACTUAL de todas las capas que cambiaron en los ultimos 3 pasos y se lanza dos veces:
+  0-0,3 % de fallos con 16, 48 y 100 frames (`tests/corpus_test.cpp`).
+- **10 metodos nuevos (20-29)**, todos sobre un nucleo comun de "capas con visibilidad por frame" (`engine/lsa*.hpp`) con el mismo exportador autocorregible. Solo usan lo ya verificado
+  (cuadrados escalados/girados, HSV o canales, Alpha/Spawn/Color triggers), sin Move/Rotate/Scale/Gradient (sus claves no las he podido comprobar en GD):
+  20 Vidas de formas (reciclaje: una forma vive mientras siga valiendo) | 21 Biblioteca de teselas | 22 Keyframes + residuos por tesela | 23 Optimizador por forma (calidad maxima) |
+  24 Reparto RD + frames repetidos | 25 Fondo + regiones de movimiento | 26 Animacion por colores (Color triggers) | 27 Vidas + optimizador | 28 Auto (prueba varios y elige) | 29 Cuadtree temporal.
+  Cada uno elige solo sus parametros con un modelo de coste (calidad frente a objetos + triggers) y el trazador interno prueba BSP puro y BSP+pintor y se queda con el mejor.
+- Resultados medidos (250 objetos/frame): bola que rebota -> el 25 llega a 43 dB con 2981 objetos (el plano da 35 dB con 7772); ping-pong -> +1,7 dB con menos objetos; el 23 gana
+  a todo en GIFs con movimiento de todo el cuerpo (+0,6 dB). Los metodos de teselas/vidas NO ganan con movimiento global: para eso esta el 28 (Auto).
+- Interfaz: 10 entradas nuevas en el selector de metodo (20-29), con descripcion; las opciones de canales/colores se aplican igual que en 18/19 (el 26 usa sus propios canales).
+- Pruebas: `tests/corpus_test.cpp` + `tests/run_corpus.sh` (reanudable) + `tests/gen_corpus.py` (22 GIFs: tamanos 16-384 px, 1-100 frames, 20-200 ms, paleta 8/16/256, transparencia,
+  ping-pong, desplazamiento, rotacion, destellos...), `tests/lsa_test.cpp` (invariantes de la cadena: z>=1, escalas, grupos, triggers sin pisarse, antes que los objetos, determinismo, PSNR
+  simulado = calculado) y `tests/robust_test.cpp` (triggers perdidos / lag).
+- NO verificado en GD real: nada de esto. El simulador es mi modelo de GD; sigue valiendo lo de "NO verificado" del README.
+
 # v0.5.4-beta
 - **Triggers autocorregibles (todos los metodos 1-19)**. Analisis de tus dos videos (1-17 y 18-19, mismo GIF de 17 frames, bucle de ~1,29 s):
   - 1-17: en CADA vuelta hay exactamente 1 hueco totalmente vacio de la duracion de un frame, siempre en la misma posicion, y el salto de pose a traves del hueco es ~1,5-2 veces

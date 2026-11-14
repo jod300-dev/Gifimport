@@ -34,6 +34,8 @@
 #include "geometrize.hpp"      // clase Geo (se reutiliza tal cual, sin modificarla)
 #include "palette.hpp"
 
+#include <set>
+#include "lsa.hpp"
 namespace gdx {
 
 // ------------------------------------------------------------- parametros ---
@@ -51,6 +53,7 @@ struct LayeredOptions {
     float stillBsp = 0.55f;   // idem para el fondo (el fondo es grande y regular: mas BSP)
     float bspFrac = 0.15f;    // fraccion del presupuesto de cada capa que usa la base BSP (el resto: rectangulos rotados)
     bool tree = false;        // metodo 19: arbol de deltas (cada frame se predice del frame mas parecido, no de un rest fijo)
+    int method = 0;           // 0 = metodos 18/19; 1..10 = metodos 20..29 (capas LSA, ver lsa_methods.hpp)
     int channels = 0;         // >0: colores en CANALES (sin HSV): paleta de hasta este numero de colores; 0 = HSV
     int firstChannel = 2;     // primer canal de la paleta (el canal 1 NUNCA se usa)
     bool denoise = true;      // mediana 3x3 antes de trazar (quita el dither del GIF; el PSNR se mide contra el original)
@@ -78,14 +81,16 @@ struct LayeredAnim {
     int restCandidates = 0;             // K probados al elegir el numero de rests (info)
     bool cancelled = false;
     std::string note;
+    std::shared_ptr<LsaAnim> lsa;       // metodos 20-29: toda la animacion vive aqui (rests/patches quedan vacios)
 
     size_t objectCount() const {
+        if (lsa) return lsa->objectCount();
         size_t n = still.shapes.size();
         for (auto& r : rests) n += r.shapes.size();
         for (auto& r : patches) n += r.shapes.size();
         return n;
     }
-    bool ok() const { return !cancelled && W > 0 && frames >= 2 && objectCount() > 0; }   // el fondo puede estar vacio (GIF con transparencia donde el sprite se mueve)
+    bool ok() const { return !cancelled && W > 0 && frames >= (lsa ? 1 : 2) && objectCount() > 0 && (!lsa || lsa->ok()); }   // el fondo puede estar vacio (GIF con transparencia donde el sprite se mueve)
 };
 
 inline const char* layeredName() { return "18. Capas: fondo + rests + parches"; }
@@ -807,12 +812,28 @@ struct LayeredSchedule {
     int nRests = 0, nPatches = 0, nSteps = 0;
     int groups = 0, triggers = 0;
     bool full = false;                  // cada paso fija el estado COMPLETO de todas las capas (ver kFullStateMaxLayers)
+    std::vector<std::vector<int>> heal; // (!full) por paso: capas a reafirmar (ids: parche j -> j, rest k -> N + k)
 };
 
 // Autocorreccion (igual que en los frames planos, ver gifanim.hpp): con pocas capas, cada paso F_i muestra las capas que toca y OCULTA todas
 // las demas (idempotente) y se lanza dos veces (en t_i y unos ms despues). Un trigger perdido / fuera de orden ya no deja una capa
 // colgada (los "restos estaticos" encima de otros frames) ni un frame sin su parche. Con mas capas se mantiene el esquema de diferencias.
 constexpr int kFullStateMaxLayers = 40;
+// Con MAS capas (GIFs largos) el paso F_i reafirma el estado ACTUAL de todas las capas que cambiaron en los ultimos kHealWindow pasos (y en el
+// propio): un trigger perdido se repara en los pasos siguientes (idempotente, Alpha es absoluto) sin tener que tocar las N capas en cada paso.
+constexpr int kHealWindow = 3;
+inline std::vector<std::vector<int>> healSets(const std::vector<std::vector<int>>& changed, int window) {
+    const int N = int(changed.size());
+    std::vector<int> steps; for (int i = 0; i < N; ++i) if (!changed[size_t(i)].empty()) steps.push_back(i);
+    std::vector<std::vector<int>> out; out.resize(size_t(N));
+    const int M = int(steps.size());
+    for (int k = 0; k < M; ++k) {                                      // ventana CICLICA sobre los pasos que existen (el bucle cierra)
+        std::set<int> u;
+        for (int w = 0; w < window && w < M; ++w) { int idx = ((k - w) % M + M) % M; for (int id : changed[size_t(steps[size_t(idx)])]) u.insert(id); }
+        out[size_t(steps[size_t(k)])].assign(u.begin(), u.end());
+    }
+    return out;
+}
 
 inline LayeredSchedule scheduleLayered(const LayeredAnim& a) {
     LayeredSchedule s;
@@ -840,8 +861,16 @@ inline LayeredSchedule scheduleLayered(const LayeredAnim& a) {
     int acts = 0; for (auto& st : s.step) acts += st.actions();
     s.full = (s.nRests + s.nPatches) <= kFullStateMaxLayers;
     if (s.full) acts = s.nSteps * (s.nRests + s.nPatches);                    // cota: una Alpha por capa y paso
+    else {
+        std::vector<std::vector<int>> changed; changed.resize(size_t(N));
+        for (int i = 0; i < N; ++i) { const LayerStep& st = s.step[size_t(i)];
+            for (int v : {st.hidePatch, st.showPatch}) if (v >= 0) changed[size_t(i)].push_back(v);
+            for (int v : {st.hideRest, st.showRest}) if (v >= 0) changed[size_t(i)].push_back(N + v); }
+        s.heal = healSets(changed, kHealWindow);
+        acts = 0; for (auto& h : s.heal) acts += int(h.size());
+    }
     s.groups = s.nRests + s.nPatches + s.nSteps + 1 + (hasI ? 1 : 0);
-    s.triggers = s.nSteps + (s.full ? s.nSteps : 0) + 1 + acts + int(s.initHidePatch.size() + s.initHideRest.size()) + 1 + (hasI ? 1 : 0) + (hasI ? 1 : 0) + int(a.palette.size());     // Spawn(F) (x2 si full) + Spawn(L) + Spawn(I) por vuelta + un Color trigger por canal
+    s.triggers = 2 * s.nSteps + 1 + acts + int(s.initHidePatch.size() + s.initHideRest.size()) + 1 + (hasI ? 1 : 0) + (hasI ? 1 : 0) + int(a.palette.size());     // Spawn(F) (x2 si full) + Spawn(L) + Spawn(I) por vuelta + un Color trigger por canal
     return s;
 }
 
@@ -922,9 +951,8 @@ inline std::string buildLayeredString(const LayeredAnim& a, const GifPlan& plan,
         if (gStep[size_t(i)] > 0) { posS(x, y); detail::addSpawn(out, p, x, y, gStep[size_t(i)], t, L); }
         t += plan.delay[size_t(i)];
     }
-    if (S.full)                                                // segunda ejecucion (idempotente) de cada paso
-        for (int i = 0; i < N; ++i)
-            if (gStep[size_t(i)] > 0) { posS(x, y); detail::addSpawn(out, p, x, y, gStep[size_t(i)], tStart[size_t(i)] + reassertDelay(plan.delay[size_t(i)]), L); }
+    for (int i = 0; i < N; ++i)                                // segunda ejecucion (idempotente) de cada paso
+        if (gStep[size_t(i)] > 0) { posS(x, y); detail::addSpawn(out, p, x, y, gStep[size_t(i)], tStart[size_t(i)] + reassertDelay(plan.delay[size_t(i)]), L); }
     posS(x, y); detail::addSpawn(out, p, x, y, L, plan.total, L);
     if (hasI) { posS(x, y); detail::addSpawn(out, p, x, y, I, 0, L); }     // autocorreccion en cada vuelta
     board.newBlock();
@@ -942,10 +970,14 @@ inline std::string buildLayeredString(const LayeredAnim& a, const GifPlan& plan,
             for (int k = 0; k < K; ++k) if (S.restLayer[size_t(k)] >= 0 && k != curR) { posA(x, y); detail::addAlpha(out, p, x, y, gRest[size_t(k)], 0, F); }
             continue;
         }
-        if (st.hidePatch >= 0) { posA(x, y); detail::addAlpha(out, p, x, y, gPatch[size_t(st.hidePatch)], 0, F); }
-        if (st.showPatch >= 0) { posA(x, y); detail::addAlpha(out, p, x, y, gPatch[size_t(st.showPatch)], 1, F); }
-        if (st.hideRest >= 0)  { posA(x, y); detail::addAlpha(out, p, x, y, gRest[size_t(st.hideRest)], 0, F); }
-        if (st.showRest >= 0)  { posA(x, y); detail::addAlpha(out, p, x, y, gRest[size_t(st.showRest)], 1, F); }
+        {   // muchas capas: reafirmar el estado actual de las capas tocadas en los ultimos pasos (primero mostrar, luego ocultar)
+            const int curP = S.patchLayer[size_t(i)];
+            const int curR = a.restOf[size_t(i)] >= 0 ? S.restLayer[size_t(a.restOf[size_t(i)])] : -1;
+            auto vis = [&](int id) { return id < N ? curP == id : curR == id - N; };
+            auto grp = [&](int id) { return id < N ? gPatch[size_t(id)] : gRest[size_t(id - N)]; };
+            for (int id : S.heal[size_t(i)]) if (vis(id)) { posA(x, y); detail::addAlpha(out, p, x, y, grp(id), 1, F); }
+            for (int id : S.heal[size_t(i)]) if (!vis(id)) { posA(x, y); detail::addAlpha(out, p, x, y, grp(id), 0, F); }
+        }
     }
     board.newBlock();
     if (hasI) {                                                // inicio I: ocultar lo que no se ve en el frame 0
