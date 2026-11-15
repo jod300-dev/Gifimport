@@ -120,7 +120,7 @@ inline LayeredAnim buildTree(const GifData& g, const GifPlan& plan, const Option
     lay::parallelFor(N, threads, [&](int i) {
         Image im = resizeArea(g.frames[size_t(plan.idx[size_t(i)])], W, H);
         if (base.grayscale) im = toGrayscale(im);
-        fr[size_t(i)] = lo.denoise ? lay::median3(im, thr) : im;
+        fr[size_t(i)] = lo.denoise ? (lo.denoiseMode == 1 ? lay::bilateral5(im, thr) : lay::median3(im, thr)) : im;
         orig[size_t(i)] = std::move(im);
     });
     std::vector<Image> sm; sm.resize(size_t(N));

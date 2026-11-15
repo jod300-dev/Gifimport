@@ -70,11 +70,12 @@ inline double psnrRgb(const std::vector<uint8_t>& a, const std::vector<uint8_t>&
     const double mse = s / double(a.size()); return mse < 1e-9 ? 99.0 : 10.0 * std::log10(255.0 * 255.0 / mse);
 }
 
-struct Entry { Image orig, mod, diff; double psnr = 0; };
+struct Entry { Image orig, mod, diff; double psnr = 0, holes = 0; };   // holes: % de pixeles opacos del GIF que el render deja sin cubrir
 inline Entry makeEntry(const GifData& g, int gifIdx, const Result& r) {
     Entry e; Image m = renderResultImage(r); const int W = m.w, H = m.h;
     Image o = g.frames[size_t(std::clamp(gifIdx, 0, int(g.frames.size()) - 1))];
     if (o.w != W || o.h != H) o = resizeArea(o, W, H);
+    { size_t h = 0, tot = 0; for (size_t i = 0; i < size_t(W) * H; ++i) if (o.rgba[i * 4 + 3] >= 128) { ++tot; if (m.rgba[i * 4 + 3] == 0) ++h; } e.holes = tot ? 100.0 * double(h) / double(tot) : 0; }
     const std::vector<uint8_t> fo = flatten(o), fm = flatten(m);
     e.orig = toRgbaOpaque(fo, W, H); e.mod = toRgbaOpaque(fm, W, H); e.psnr = psnrRgb(fo, fm);
     std::vector<uint8_t> d(size_t(W) * H * 3); for (size_t i = 0; i < d.size(); ++i) d[i] = uint8_t(std::min(255, std::abs(int(fo[i]) - int(fm[i])) * 3));
@@ -270,7 +271,7 @@ inline Output build(const Input& in) {
         const Result& r = (*in.frames)[size_t(i)];
         if (r.rasterW <= 0 && r.previewImg.w <= 0) { R << "f" << i << ": sin imagen\n"; continue; }
         Entry e = makeEntry(g, plan.idx[size_t(i)], r); sum += e.psnr; mn = std::min(mn, e.psnr); ++counted;
-        R << "f" << i << " (gif " << plan.idx[size_t(i)] << "): formas " << r.shapes.size() << "  PSNR " << std::setprecision(1) << e.psnr << " dB" << (r.note.empty() ? "" : "  | " + r.note) << "\n";
+        R << "f" << i << " (gif " << plan.idx[size_t(i)] << "): formas " << r.shapes.size() << "  PSNR " << std::setprecision(1) << e.psnr << " dB  huecos " << std::setprecision(3) << e.holes << "%" << (e.holes > 0.05 ? "  <-- AVISO: pixeles sin cubrir (se vera el fondo del nivel)" : "") << (r.note.empty() ? "" : "  | " + r.note) << "\n";
         bool want = i == dtIdx[0] || i == dtIdx[1]; for (int v : ovIdx) want |= v == i;
         if (want) keep[i] = std::move(e);
     }

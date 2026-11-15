@@ -231,7 +231,7 @@
 			"type": "bool",
 			"default": true,
 			"name": "Quitar ruido del GIF",
-			"description": "Aplica una mediana 3x3 antes de trazar las capas. Quita el dither/ruido de paleta de los GIF (no gasta objetos en ruido). Desactivalo para GIF de pixel art."
+			"description": "Filtro anti-dithering (bilateral 5x5) antes de trazar las capas (metodos 18-29): quita el dither/ruido de paleta de los GIF sin borrar las lineas finas ni los contornos, asi no se gastan objetos en ruido. En GIF de pixel art sin dither da practicamente igual que desactivarlo."
 		}
 	},
 	"tags": [

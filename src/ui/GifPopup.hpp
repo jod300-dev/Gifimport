@@ -103,6 +103,7 @@ protected:
 
     EditorUI* m_editor = nullptr;
     std::shared_ptr<const gdx::GifData> m_gif;
+    std::shared_ptr<const std::vector<uint8_t>> m_gifBytes;   // bytes del archivo GIF (se copian al informe de diagnostico)
     std::shared_ptr<PreviewJob> m_job;
     std::shared_ptr<BuildJob> m_build;
     int m_jobCounter = 0;

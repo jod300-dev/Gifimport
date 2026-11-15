@@ -344,7 +344,9 @@ inline bool lifetimesRun(const Ctx& c, double tau0, long Bobj, bool refine, std:
     mean = N > 1 ? mean / (N - 1) : 1.0; wt[0] = std::max(c.contentArea * 0.5, 2.0 * mean);
     std::vector<double> cum(size_t(N) + 2, 0.0); for (int i = N - 1; i >= 0; --i) cum[size_t(i)] = cum[size_t(i) + 1] + wt[size_t(i)];
     const double totW = cum[0];
-    std::vector<Live> alive; fin.clear(); double tau = tau0; long pool = Bobj, used = 0; double planned = 0;
+    // reserva del 7 % para los rellenos de cobertura; el resto se reparte a densidad uniforme (antes un frame con pocos cambios en el estimador gastaba de mas
+    // al principio y los ultimos frames se quedaban sin formas nuevas: 15 dB en el ultimo frame)
+    std::vector<Live> alive; fin.clear(); double tau = tau0; long pool = long(double(Bobj) * 0.93), used = 0; double planned = 0;
     double sumCnt = 0, sumWt = 0;                                                    // calibra el area futura estimada con la real
     const int rounds = std::clamp(c.quality, 1, 3);
     for (int i = 0; i < N; ++i) {
@@ -390,12 +392,24 @@ inline bool lifetimesRun(const Ctx& c, double tau0, long Bobj, bool refine, std:
         }
         std::vector<uint8_t> mask = lay::cleanMask(raw, W, H, c.lo.grow);
         if (i == 0 || alive.empty()) for (size_t p = 0; p < np; ++p) mask[p] = tg.rgba[p * 4 + 3] >= c.thr ? 1 : 0;
+        else {                                                                         // los pixeles sin forma entran en la mascara con un pixel de margen: el trazador los cubre con sus formas normales (menos rellenos)
+            for (int y = 0; y < H; ++y) for (int x = 0; x < W; ++x) {
+                const size_t p = size_t(y) * W + size_t(x); if (ids[p] >= 0 || c.sm[size_t(i)].rgba[p * 4 + 3] < c.thr) continue;
+                for (int dy = -1; dy <= 1; ++dy) for (int dx = -1; dx <= 1; ++dx) { const int xx = x + dx, yy = y + dy; if (xx >= 0 && yy >= 0 && xx < W && yy < H && c.sm[size_t(i)].rgba[(size_t(yy) * W + size_t(xx)) * 4 + 3] >= c.thr) mask[size_t(yy) * W + size_t(xx)] = 1; }
+            }
+        }      // lo que no cubre ninguna forma SIEMPRE se pinta (la limpieza de motas lo dejaba como hueco)
         size_t cnt = 0; for (uint8_t v : mask) cnt += v;
         // presupuesto: densidad uniforme = lo que queda en la bolsa / (area que hay que pintar ahora + la que se espera en los frames que faltan)
-        const double ratio = (i > 1 && sumWt > 0) ? std::clamp(sumCnt / sumWt, 0.4, 3.0) : 1.0;
+        // area que realmente hay que repintar / area estimada por la diferencia entre frames consecutivos (en la practica ~2: incluye lo que cambio bajo cada forma
+        // y el margen). Con a priori 2 que se corrige con lo observado, para no subestimar el area futura al principio.
+        const double priorW = 2.0 * mean;
+        const double ratio = std::clamp((sumCnt + 2.0 * priorW) / (sumWt + priorW), 1.0, 4.0);
         const double futArea = cum[size_t(i) + 1] * ratio;
         int b = int(std::max(0.0, double(pool) * double(cnt) / std::max(1e-9, double(cnt) + futArea)));
-        b = std::min(b, lay::areaBudget(cnt, 100000)); if (cnt > 0) b = std::max(b, std::min<int>(4, int(pool)));
+        b = std::min(b, lay::areaBudget(cnt, 100000));
+        // reserva minima para los frames que faltan: ninguno se queda sin formas nuevas aunque el area futura se haya subestimado
+        { const long keepFor = long(std::max(0.0, double(Bobj) * 0.9 / double(N) * 0.65)) * long(N - 1 - i); if (cnt > 0 && pool - keepFor > 0) b = int(std::min<long>(b, pool - keepFor)); else if (cnt > 0) b = std::min<int>(b, 4); }
+        if (cnt > 0) b = std::max(b, std::min<int>(4, int(pool)));
         if (i > 0) { sumCnt += double(cnt); sumWt += wt[size_t(i)]; }
         if (cnt > 0 && b > 0 && pool > 0) {
             Image under = canvas; std::vector<uint8_t> valid(np, 0); bool any = false;
@@ -405,6 +419,25 @@ inline bool lifetimesRun(const Ctx& c, double tau0, long Bobj, bool refine, std:
             if (refine && !res.shapes.empty()) refineShapes(res.shapes, tg, up, c.thr, rounds, c.seed + uint32_t(i), 20000L + long(res.shapes.size()) * 400L);
             for (const Shape& s : res.shapes) { Live l; l.s = s; l.birth = i; alive.push_back(l); }
             pool -= long(res.shapes.size()); used += long(res.shapes.size());
+        }
+        // garantia de cobertura: si tras todo queda algun pixel opaco sin forma, se rellena con tiras de 1 px (un hueco deja ver el fondo del nivel)
+        {
+            const std::vector<size_t> ord = orderOf(); std::vector<Shape> sh; sh.reserve(ord.size());
+            for (size_t r = 0; r < ord.size(); ++r) { Shape s = alive[ord[r]].s; s.z = int16_t(std::min<size_t>(32000, r)); sh.push_back(s); }
+            const Image cv = renderShapes(sh, W, H); size_t added = 0;
+            std::vector<uint8_t> need(np, 0); bool anyNeed = false;
+            for (size_t p = 0; p < np; ++p) if (cv.rgba[p * 4 + 3] == 0 && tg.rgba[p * 4 + 3] >= c.thr) { need[p] = 1; anyNeed = true; }
+            // cubrimiento voraz con rectangulos: crece a la derecha y luego hacia abajo mientras todo siga sin cubrir (muchos menos objetos que una tira por fila)
+            for (int y = 0; anyNeed && y < H; ++y) for (int x = 0; x < W; ++x) {
+                if (!need[size_t(y) * W + size_t(x)]) continue;
+                int x1 = x; while (x1 + 1 < W && need[size_t(y) * W + size_t(x1) + 1]) ++x1;
+                int y1 = y; for (;;) { if (y1 + 1 >= H) break; bool ok = true; for (int xx = x; xx <= x1; ++xx) if (!need[size_t(y1 + 1) * W + size_t(xx)]) { ok = false; break; } if (!ok) break; ++y1; }
+                for (int yy = y; yy <= y1; ++yy) for (int xx = x; xx <= x1; ++xx) need[size_t(yy) * W + size_t(xx)] = 0;
+                const uint8_t* col = &tg.rgba[(size_t((y + y1) / 2) * W + size_t((x + x1) / 2)) * 4];
+                Shape f; f.cx = 0.5f * float(x + x1 + 1); f.cy = 0.5f * float(y + y1 + 1); f.w = float(x1 - x + 1); f.h = float(y1 - y + 1); f.rot = 0; f.r = col[0]; f.g = col[1]; f.b = col[2]; f.z = 0;
+                Live l; l.s = f; l.birth = i; alive.push_back(l); ++added; pool -= 1; used += 1; x = x1;
+            }
+            (void)added;
         }
         planned += double(Bobj) * wt[size_t(i)] / totW;                               // ritmo: si se gasta mas de lo previsto, tolerancia mas laxa (mas vida)
         tau = std::clamp(tau0 * std::exp(8.0 * (double(used) - planned) / std::max(1.0, double(Bobj))), 0.02, 0.6);

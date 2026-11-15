@@ -403,6 +403,7 @@ void GifPopup::loadGifBytes(std::vector<uint8_t> const& bytes) {
         Notification::create(nb, NotificationIcon::Info, 4.f)->show();
     }
     m_gif = gif;
+    m_gifBytes = std::make_shared<const std::vector<uint8_t>>(bytes);
     m_layered = nullptr;
     m_hasResult = false;
     this->refreshLabels();
@@ -852,6 +853,7 @@ void GifPopup::saveDiagnostics(std::shared_ptr<BuildJob> const& job, gdx::GifExp
         put("objetos.tsv", out.objetos.data(), out.objetos.size());
         put("triggers.tsv", out.triggers.data(), out.triggers.size());
         if (!out.comparacion.empty()) put("comparacion.png", reinterpret_cast<const char*>(out.comparacion.data()), out.comparacion.size());
+        if (m_gifBytes && !m_gifBytes->empty() && m_gifBytes->size() <= 40u * 1024u * 1024u) put("original.gif", reinterpret_cast<const char*>(m_gifBytes->data()), m_gifBytes->size());   // el GIF de entrada: permite reproducir todo
         if (!out.detalle.empty()) put("detalle.png", reinterpret_cast<const char*>(out.detalle.data()), out.detalle.size());
 
         // solo se conservan los 8 informes mas recientes (cada uno puede pesar varios MB)

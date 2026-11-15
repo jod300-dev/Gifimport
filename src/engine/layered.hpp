@@ -57,6 +57,7 @@ struct LayeredOptions {
     int channels = 0;         // >0: colores en CANALES (sin HSV): paleta de hasta este numero de colores; 0 = HSV
     int firstChannel = 2;     // primer canal de la paleta (el canal 1 NUNCA se usa)
     int effort = 1;           // v0.5.6: duracion de calculo de 18-29: 0 Rapido (busqueda corta), 1 Normal (como antes), 2 Alto, 3 Maximo
+    int denoiseMode = 1;      // 0 = mediana 3x3 (v0.5.6 y antes: borraba lineas finas), 1 = bilateral anti-dithering que respeta bordes (v0.5.7)
     bool denoise = true;      // mediana 3x3 antes de trazar (quita el dither del GIF; el PSNR se mide contra el original)
 };
 
@@ -294,6 +295,38 @@ inline void kMedoids(const std::vector<float>& D, int N, int K, std::vector<int>
 }
 
 // Mediana 3x3 por canal entre pixeles opacos (quita el ruido de dither conservando los bordes).
+// Quita el dithering respetando los bordes: media de la ventana 5x5 ponderada por cercania espacial y de COLOR (filtro bilateral). Las parejas de colores de un
+// patron de dither (distancia pequena) se promedian en un tono suave; un contorno oscuro junto a un relleno claro (distancia grande) casi no se mezcla.
+#ifndef BIL_SIGR
+#define BIL_SIGR 26.0
+#endif
+#ifndef BIL_SIGS
+#define BIL_SIGS 1.0
+#endif
+inline Image bilateral5(const Image& s, int thr, double sigR = BIL_SIGR, double sigS = BIL_SIGS) {
+    Image o = s; static thread_local std::vector<float> lut; static thread_local double lastSig = -1;
+    const int NL = 4096;                                                         // d2 / 48 (d2 max = 3*255^2 = 195075 -> 4064)
+    if (lastSig != sigR) { lut.assign(size_t(NL), 0.f); for (int i = 0; i < NL; ++i) lut[size_t(i)] = float(std::exp(-(double(i) * 48.0) / (2.0 * sigR * sigR))); lastSig = sigR; }
+    float sw[5][5]; for (int dy = -2; dy <= 2; ++dy) for (int dx = -2; dx <= 2; ++dx) sw[dy + 2][dx + 2] = float(std::exp(-(dx * dx + dy * dy) / (2.0 * sigS * sigS)));
+    for (int y = 0; y < s.h; ++y)
+        for (int x = 0; x < s.w; ++x) {
+            const uint8_t* c = s.at(x, y); if (c[3] < thr) continue;
+            float acc[3] = {0, 0, 0}, wsum = 0;
+            for (int dy = -2; dy <= 2; ++dy) {
+                const int yy = y + dy; if (yy < 0 || yy >= s.h) continue;
+                for (int dx = -2; dx <= 2; ++dx) {
+                    const int xx = x + dx; if (xx < 0 || xx >= s.w) continue;
+                    const uint8_t* p = s.at(xx, yy); if (p[3] < thr) continue;
+                    const int d0 = int(p[0]) - c[0], d1 = int(p[1]) - c[1], d2 = int(p[2]) - c[2];
+                    const float w = sw[dy + 2][dx + 2] * lut[size_t(std::min(NL - 1, (d0 * d0 + d1 * d1 + d2 * d2) / 48))];
+                    acc[0] += w * p[0]; acc[1] += w * p[1]; acc[2] += w * p[2]; wsum += w;
+                }
+            }
+            uint8_t* q = o.at(x, y);
+            for (int k = 0; k < 3; ++k) q[k] = uint8_t(std::clamp(acc[k] / wsum + 0.5f, 0.f, 255.f));
+        }
+    return o;
+}
 inline Image median3(const Image& s, int thr) {
     Image o = s;
     for (int y = 0; y < s.h; ++y)
@@ -548,7 +581,7 @@ inline LayeredAnim buildLayered(const GifData& g, const GifPlan& plan, const Opt
     lay::parallelFor(N, threads, [&](int i) {
         Image im = resizeArea(g.frames[size_t(plan.idx[size_t(i)])], W, H);
         if (base.grayscale) im = toGrayscale(im);
-        fr[size_t(i)] = lo.denoise ? lay::median3(im, thr) : im;
+        fr[size_t(i)] = lo.denoise ? (lo.denoiseMode == 1 ? lay::bilateral5(im, thr) : lay::median3(im, thr)) : im;
         orig[size_t(i)] = std::move(im);
     });
     std::vector<Image> sm; sm.resize(size_t(N));

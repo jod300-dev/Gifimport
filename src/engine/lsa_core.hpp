@@ -29,7 +29,7 @@ inline Ctx makeCtx(const GifData& g, const GifPlan& plan, const Options& base, c
     lay::parallelFor(c.N, c.threads, [&](int i) {
         Image im = resizeArea(g.frames[size_t(plan.idx[size_t(i)])], W, H);
         if (base.grayscale) im = toGrayscale(im);
-        c.fr[size_t(i)] = lo.denoise ? lay::median3(im, c.thr) : im;
+        c.fr[size_t(i)] = lo.denoise ? (lo.denoiseMode == 1 ? lay::bilateral5(im, c.thr) : lay::median3(im, c.thr)) : im;
         c.orig[size_t(i)] = std::move(im);
     });
     lay::parallelFor(c.N, c.threads, [&](int i) { c.sm[size_t(i)] = lay::blur3(c.fr[size_t(i)], c.thr); });

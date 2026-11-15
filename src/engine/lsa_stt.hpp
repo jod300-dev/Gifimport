@@ -250,7 +250,7 @@ inline bool buildColorAnim(const Ctx& c, LsaAnim& A) {
     }
     report(c.prog, 0.7f);
     if (plans.empty()) { A.note = "No se pudo calcular el metodo"; return false; }
-    const double tol = c.quality >= 3 ? 0.4 : c.quality == 2 ? 0.7 : 1.0;
+    const double tol = c.quality >= 3 ? 0.2 : c.quality == 2 ? 0.35 : 0.5;
     const double target = std::min(bestPsnr, 42.0) - tol;
     Plan pick = plans.front(); double bc = 1e300;
     for (const Plan& p : plans) if (p.psnr >= target && p.cost < bc) { bc = p.cost; pick = p; }

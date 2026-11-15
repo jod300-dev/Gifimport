@@ -9,6 +9,7 @@
 #include <chrono>
 #include <fstream>
 #include <iostream>
+#include "diag.hpp"
 using namespace gdx;
 int main(int argc, char** argv) {
     if (argc < 3) { std::puts("uso: bench_lsa gif metodo [obj/frame] [frames] [maxRaster] [calidad] [canales] [hilos] [duracion]"); return 2; }
@@ -27,6 +28,7 @@ int main(int argc, char** argv) {
 #else
     (void)dur;
 #endif
+    if (getenv("DMODE")) lo.denoiseMode = atoi(getenv("DMODE"));
     if (getenv("DENOISE")) lo.denoise = atoi(getenv("DENOISE")) != 0;
     auto t0 = std::chrono::steady_clock::now();
     LayeredAnim A = buildAnim(g, plan, o, lo, nullptr, th);
@@ -40,6 +42,27 @@ int main(int argc, char** argv) {
     uint64_t h = 1469598103934665603ULL; for (unsigned char c : chain) { h ^= c; h *= 1099511628211ULL; }
     std::printf("m%-2d N=%-3d %6.0fms obj+trig=%-6zu trig=%-5d colorTrig=%-4zu PSNR avg %5.1f min %5.1f hash=%016llx | %s\n", m, N, ms, objs, animTriggerCount(A), colorTrig,
                 A.psnrAvg, A.psnrMin, (unsigned long long)h, A.note.c_str());
+    if (const char* cd = getenv("CLEAN")) {                       // PSNR frente a los frames LIMPIOS (sin dithering): lo que se ve de verdad
+        double sum = 0, mn = 1e9; int cnt = 0;
+        for (int fr = 0; fr < N; ++fr) {
+            Result r = animFrameResult(A, fr); char nm[512]; std::snprintf(nm, sizeof nm, "%s/c_%03d.png", cd, plan.idx[size_t(fr)] + 1);
+            std::ifstream pf(nm, std::ios::binary); std::vector<uint8_t> pb((std::istreambuf_iterator<char>(pf)), {}); if (pb.empty()) continue;
+            int w, h, c; uint8_t* px = stbi_load_from_memory(pb.data(), int(pb.size()), &w, &h, &c, 4); if (!px) continue;
+            Image cl; cl.w = w; cl.h = h; cl.rgba.assign(px, px + size_t(w) * h * 4); stbi_image_free(px);
+            Image m = renderShapes(r.shapes, r.rasterW, r.rasterH); if (cl.w != m.w || cl.h != m.h) cl = resizeArea(cl, m.w, m.h);
+            const double v = diag::psnrRgb(diag::flatten(cl), diag::flatten(m)); sum += v; mn = std::min(mn, v); ++cnt;
+        }
+        if (cnt) std::printf("  PSNR vs LIMPIO: avg %.2f min %.2f\n", sum / cnt, mn);
+    }
+    {   // huecos: pixeles del GIF (opaco) que el render deja SIN cubrir (se veria el fondo del nivel)
+        double worst = 0, tot = 0; int wf = 0;
+        for (int fr = 0; fr < N; ++fr) {
+            Result r = animFrameResult(A, fr); Image m = renderShapes(r.shapes, r.rasterW, r.rasterH); size_t holes = 0;
+            for (size_t i = 0; i < size_t(m.w) * m.h; ++i) if (m.rgba[i * 4 + 3] == 0) ++holes;
+            const double pc = 100.0 * double(holes) / double(m.w * m.h); tot += pc; if (pc > worst) { worst = pc; wf = fr; }
+        }
+        std::printf("  huecos sin cubrir: media %.3f%%  peor %.3f%% (f%d)\n", tot / N, worst, wf);
+    }
     if (getenv("PSNRS")) { std::printf("  psnr/frame:"); for (double v : A.psnr) std::printf(" %.1f", v); std::printf("\n"); }
     return 0;
 }

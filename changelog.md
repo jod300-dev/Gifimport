@@ -1,4 +1,13 @@
 # v0.5.7-beta
+- **Analisis de los 11 informes reales (metodos 18-29 con el GIF de la catgirl 360x334, 300 obj/frame): todos daban ~15 dB y se veian "blandos", sin contornos.** Causas encontradas y arregladas:
+  - **El filtro de ruido (mediana 3x3) borraba las lineas finas y convertia el dithering en manchas.** Ahora es un filtro bilateral 5x5 anti-dithering que respeta los bordes (`lay::bilateral5`, ajuste "Quitar ruido del GIF"). Medido contra los frames LIMPIOS en un GIF con dithering Bayer:
+    18: 23,4 -> 25,7 dB | 19: 23,3 -> 25,2 | 21/29: 23,0 -> 24,3 | 22: 23,4 -> 25,7 | 24: 22,8 -> 23,5 | 25: 22,5 -> 23,5 | 26: 24,1 -> 27,8 (con menos objetos), con los mismos objetos.
+    En GIF sin dither iguala a desactivar el filtro (antes la mediana perdia ~2,5 dB).
+  - **Metodos 20 y 27 dejaban huecos** (pixeles sin ninguna forma: se ve el fondo del nivel, las "manchas negras" del frame 16): la limpieza de motas dejaba fuera de la mascara los pixeles sueltos sin cubrir. Ahora lo no cubierto siempre se pinta
+    (con margen de 1 px) y una garantia final rellena lo que quede con rectangulos voraces. Huecos medidos: 0,34 % -> 0 %.
+  - **20 y 27: los ultimos frames se quedaban sin objetos** (13-15 dB en el ultimo). Reserva minima por frame restante y estimacion del area futura con a priori; peor frame 13,0 -> 17,6/18,3 dB.
+  - **26: el plan elegia gastar la mitad del presupuesto** (tolerancia de 1 dB). Con "maxima calidad" ahora tolera 0,5 dB (0,35 en Alto, 0,2 en Maximo).
+- El informe de diagnostico incluye ahora `original.gif` (el GIF de entrada, para reproducir todo exactamente) y mide por frame los **huecos sin cubrir** (aviso si > 0,05 %).
 - **Nuevo ajuste "Guardar informe de diagnostico al colocar"** (Ajustes > Diagnostico, desactivado por defecto). Cada vez que colocas un GIF guarda en `<carpeta del mod>/diagnostics/<fecha>_m<metodo>/`:
   - `informe.txt`: version, plataforma, ajustes del mod y de la ventana, datos del GIF (tamano, frames, retardos), plan de frames, tiempo de calculo, estadisticas de la cadena (objetos por id, caja, z-order, grupos, canales),
     **comprobaciones automaticas** (grupos objetivo sin objetos, triggers spawn que nadie lanza, canales de color sin Color trigger, canal 1 usado, z=0, escalas diminutas/enormes, NaN, mas de 200000 objetos),
