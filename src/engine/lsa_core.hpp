@@ -15,21 +15,25 @@ struct Ctx {
     std::vector<Image> orig, fr, sm;     // orig = frame al raster de trabajo; fr = sin dither (mediana 3x3); sm = suavizado (para comparar)
     bool opaqueAll = true; double contentArea = 1; long total = 0;
     uint32_t seed = 1337;
+    double noise = 0;                    // ruido/dithering medido del GIF (lay::noiseOf)
 };
 
 inline Ctx makeCtx(const GifData& g, const GifPlan& plan, const Options& base, const LayeredOptions& lo, Progress* prog, int threads) {
     Ctx c; c.N = plan.count(); c.base = base; c.lo = lo; c.prog = prog; c.threads = std::max(1, threads);
     c.thr = std::clamp(base.alphaThreshold, 1, 255); c.tol = std::clamp(lo.tol, 4, 120);
-    c.quality = std::clamp(base.quality, 0, 3); c.seed = base.seed;
+    c.quality = std::clamp(base.quality, 0, 5); c.seed = base.seed;
     int mr = std::clamp(base.maxRaster, 64, 1024), W, H;
     fitSize(g.w, g.h, mr, W, H);
     while (int64_t(W) * H * c.N > 9000000LL && mr > 64) { mr = int(mr * 0.88); fitSize(g.w, g.h, mr, W, H); }
     c.W = W; c.H = H;
     c.orig.resize(size_t(c.N)); c.fr.resize(size_t(c.N)); c.sm.resize(size_t(c.N));
+    lay::DenoiseCfg dcfg;
+    if (lo.denoise && lo.denoiseMode == 1) { std::vector<Image> smp; for (int k : {0, c.N / 2, c.N - 1}) { Image im = resizeArea(g.frames[size_t(plan.idx[size_t(std::clamp(k, 0, c.N - 1))])], W, H); if (base.grayscale) im = toGrayscale(im); smp.push_back(std::move(im)); } dcfg = lay::chooseDenoise(smp, c.thr); }
+    c.noise = dcfg.noise;
     lay::parallelFor(c.N, c.threads, [&](int i) {
         Image im = resizeArea(g.frames[size_t(plan.idx[size_t(i)])], W, H);
         if (base.grayscale) im = toGrayscale(im);
-        c.fr[size_t(i)] = lo.denoise ? (lo.denoiseMode == 1 ? lay::bilateral5(im, c.thr) : lay::median3(im, c.thr)) : im;
+        c.fr[size_t(i)] = lo.denoise ? (lo.denoiseMode == 1 ? lay::applyDenoise(im, c.thr, dcfg) : lay::median3(im, c.thr)) : im;
         c.orig[size_t(i)] = std::move(im);
     });
     lay::parallelFor(c.N, c.threads, [&](int i) { c.sm[size_t(i)] = lay::blur3(c.fr[size_t(i)], c.thr); });

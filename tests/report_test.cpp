@@ -19,7 +19,7 @@ int main(int argc, char** argv) {
     Options o; o.maxRaster = 256; o.quality = 1; o.budget = per; o.lightSpecialChannels = true; o.maxChannels = 0; o.colorChannels = false; o.mainChannels = false;
     GifExportParams p; p.baseGroup = 100; p.eo.longSide = 600; p.trigX = -30; std::string err, chain; std::vector<Result> frames; std::shared_ptr<LayeredAnim> A;
     if (m >= 18) {
-        LayeredOptions lo; lo.perFrame = per; lo.tree = m == 19; lo.maxTotal = 100000; lo.channels = ch ? 64 : 0; lo.firstChannel = 2; lo.method = m >= 20 ? m - 19 : 0;
+        LayeredOptions lo; if (getenv("EDGEW")) lo.edgeWeight = float(atof(getenv("EDGEW"))); if (getenv("SIZEK")) lo.sizeFloor = float(atof(getenv("SIZEK"))); lo.perFrame = per; lo.tree = m == 19; lo.maxTotal = 100000; lo.channels = ch ? 64 : 0; lo.firstChannel = 2; lo.method = m >= 20 ? m - 19 : 0;
         A = std::make_shared<LayeredAnim>(buildAnim(g, plan, o, lo, nullptr, 2)); if (!A->ok()) { std::puts("anim no ok"); return 1; }
         chain = buildAnimString(*A, plan, p, &err); for (int i = 0; i < N; ++i) frames.push_back(animFrameResult(*A, i));
     } else {

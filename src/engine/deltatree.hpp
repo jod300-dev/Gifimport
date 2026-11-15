@@ -117,10 +117,13 @@ inline LayeredAnim buildTree(const GifData& g, const GifPlan& plan, const Option
 
     std::vector<Image> orig; orig.resize(size_t(N));
     std::vector<Image> fr; fr.resize(size_t(N));
+    lay::DenoiseCfg dcfg;
+    if (lo.denoise && lo.denoiseMode == 1) { std::vector<Image> smp; for (int k : {0, N / 2, N - 1}) { Image im = resizeArea(g.frames[size_t(plan.idx[size_t(std::clamp(k, 0, N - 1))])], W, H); if (base.grayscale) im = toGrayscale(im); smp.push_back(std::move(im)); } dcfg = lay::chooseDenoise(smp, thr); }
+    A.noise = dcfg.noise;
     lay::parallelFor(N, threads, [&](int i) {
         Image im = resizeArea(g.frames[size_t(plan.idx[size_t(i)])], W, H);
         if (base.grayscale) im = toGrayscale(im);
-        fr[size_t(i)] = lo.denoise ? (lo.denoiseMode == 1 ? lay::bilateral5(im, thr) : lay::median3(im, thr)) : im;
+        fr[size_t(i)] = lo.denoise ? (lo.denoiseMode == 1 ? lay::applyDenoise(im, thr, dcfg) : lay::median3(im, thr)) : im;
         orig[size_t(i)] = std::move(im);
     });
     std::vector<Image> sm; sm.resize(size_t(N));
@@ -143,7 +146,7 @@ inline LayeredAnim buildTree(const GifData& g, const GifPlan& plan, const Option
     bool opaqueAll = true;
     for (int i = 0; i < N && opaqueAll; ++i) if (lay::opaqueCount(orig[size_t(i)], thr) != size_t(W) * H) opaqueAll = false;
     const bool usePainter = lo.painter != 0 && opaqueAll;
-    const int pq = std::clamp(base.quality, 0, 3);
+    const int pq = std::clamp(base.quality, 0, 5);
     const double bf = std::clamp<double>(lo.bspFrac, 0.05, 1.0);
 
     // --- area que cambia entre cada par de frames (a baja resolucion) -> arbol de expansion minima (Prim) con raiz = fondo
@@ -439,7 +442,7 @@ inline void capAnim(LayeredAnim& A, int maxTotal) {
 }
 
 inline LayeredAnim buildAnim(const GifData& g, const GifPlan& plan, const Options& base0, const LayeredOptions& lo, Progress* prog, int threads) {
-    Options base = base0; base.quality = std::clamp(lo.effort, 0, 3);                  // 18-29: la duracion de calculo la fija su propio ajuste
+    Options base = base0; base.quality = std::clamp(lo.effort, 0, 5); base.edgeWeight = lo.edgeWeight; base.sizeFloor = lo.sizeFloor;                  // 18-29: la duracion de calculo la fija su propio ajuste
     if (lo.method > 0) return buildLsaAnim(g, plan, base, lo, prog, threads);          // metodos 20-29 (cierre y tope de objetos incluidos)
     LayeredAnim A = lo.tree ? buildTree(g, plan, base, lo, prog, threads) : buildLayered(g, plan, base, lo, prog, threads);
     capAnim(A, lo.maxTotal);

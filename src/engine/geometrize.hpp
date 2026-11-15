@@ -18,6 +18,7 @@ public:
         canvas.assign(size_t(W) * H * 3, 0);
         for (int i = 0; i < W * H; ++i) {
             px[i].r = target.rgba[size_t(i) * 4]; px[i].g = target.rgba[size_t(i) * 4 + 1]; px[i].b = target.rgba[size_t(i) * 4 + 2];
+            px[i].r0 = px[i].r; px[i].g0 = px[i].g; px[i].b0 = px[i].b;
             px[i].tt = px[i].r * px[i].r + px[i].g * px[i].g + px[i].b * px[i].b;
         }
         tx = (W + kTile - 1) / kTile; ty = (H + kTile - 1) / kTile;
@@ -26,10 +27,20 @@ public:
         // sumas por fila (prefijos): cada fila de un candidato cuesta O(1) en vez de O(ancho). Los valores son enteros exactos, asi que
         // los resultados son IDENTICOS a sumar pixel a pixel (solo cambia la velocidad).
         pre.assign(size_t(W + 1) * H, Acc{});
+        rebuildStatic();
+    }
+    void rebuildStatic() {
         for (int y = 0; y < H; ++y) {
             Acc a{}; Acc* row = &pre[size_t(y) * (W + 1)];
-            for (int x = 0; x < W; ++x) { const Px& q = px[size_t(y) * W + x]; a.r += q.r; a.g += q.g; a.b += q.b; a.tt += q.tt; row[x + 1] = a; }
+            for (int x = 0; x < W; ++x) { const Px& q = px[size_t(y) * W + x]; a.r += q.r; a.g += q.g; a.b += q.b; a.w += q.w; a.tt += q.tt; row[x + 1] = a; }
         }
+    }
+    // Pesos por pixel (1..8): el error de un pixel de peso w cuenta w veces y el color de una forma es la media PONDERADA. Con todos a 1 es identico a no usarlos.
+    // Tamano final de las formas segun el presupuesto: con pocos objetos el pintor ya no baja a formas de 2-3 px (confeti), termina en formas de ~k*sqrt(area/objetos)
+    void setSizeFloor(float k) { sizeK = k; }
+    void setWeights(const std::vector<uint8_t>& w) {
+        for (int i = 0; i < W * H; ++i) { const int k = std::clamp<int>(w[size_t(i)], 1, 8); px[i].w = k; px[i].r = px[i].r0 * k; px[i].g = px[i].g0 * k; px[i].b = px[i].b0 * k; px[i].tt = (px[i].r0 * px[i].r0 + px[i].g0 * px[i].g0 + px[i].b0 * px[i].b0) * k; }
+        rebuildStatic();
     }
 
     // GIF con transparencia: los rectangulos solo pueden cubrir pixeles OPACOS (valid[i] = 1). Los transparentes no cuentan como error.
@@ -61,9 +72,9 @@ public:
     std::vector<Shape> run(int count, int z0, int quality, Progress* prog, float progBase, float progSpan) {
         std::vector<Shape> out;
         out.reserve(size_t(count));
-        static const int kM[4] = {16, 32, 64, 128}, kK[4] = {32, 64, 128, 256};
-        const int M = kM[std::clamp(quality, 0, 3)];                    // candidatos aleatorios por forma
-        const int K = kK[std::clamp(quality, 0, 3)];                    // pasos de escalada por forma
+        static const int kM[6] = {16, 32, 64, 128, 256, 512}, kK[6] = {32, 64, 128, 256, 512, 1024};
+        const int M = kM[std::clamp(quality, 0, 5)];                    // candidatos aleatorios por forma
+        const int K = kK[std::clamp(quality, 0, 5)];                    // pasos de escalada por forma
         std::vector<double> prefix(tileErr.size() + 1, 0.0);
         for (int i = 0; i < count; ++i) {
             if ((i & 63) == 0) {
@@ -73,7 +84,9 @@ public:
             // distribución de probabilidad por tiles (más error => más probable)
             for (size_t t = 0; t < tileErr.size(); ++t) prefix[t + 1] = prefix[t] + tileErr[t] + 1e-3;
             float frac = float(i) / std::max(1, count);
-            float maxS = std::max(2.0f, L * 0.6f * std::pow(0.012f, frac));
+            float fin = 0.012f;                                              // factor final de tamano (como siempre)
+            if (sizeK > 0.f) { const float area = float(W) * float(H); const float endS = std::max(2.0f, sizeK * std::sqrt(area / float(std::max(1, count)))); fin = std::clamp(endS / (L * 0.6f), 0.012f, 0.6f); }
+            float maxS = std::max(2.0f, L * 0.6f * std::pow(fin, frac));
             float minS = std::max(0.75f, maxS * 0.1f);
 
             Cand best{}; Ev bestEv; bestEv.gain = -1e300;
@@ -102,11 +115,12 @@ public:
 
 private:
     static constexpr int kTile = 8;
-    struct Px { int32_t r, g, b, tt, e; };
-    struct Acc { int32_t r = 0, g = 0, b = 0, tt = 0, e = 0; };         // suma acumulada de una fila hasta x (exclusive)
+    // Cada pixel tiene un peso w (1 = como siempre). r,g,b,tt,e se guardan YA multiplicados por w; asi la media y el error ponderados salen de las mismas sumas.
+    struct Px { int32_t r, g, b, tt, e; int32_t w = 1, r0 = 0, g0 = 0, b0 = 0; };
+    struct Acc { int32_t r = 0, g = 0, b = 0, w = 0; int64_t tt = 0, e = 0; };   // suma acumulada de una fila hasta x (exclusive)
     std::vector<Acc> pre;                                                // (W + 1) por fila
     struct Ev { double gain = -1e300, mr = 0, mg = 0, mb = 0; };
-    int W, H; float L;
+    int W, H; float L; float sizeK = 0.f;
     Rng rng;
     std::vector<Px> px;
     std::vector<uint8_t> canvas;
@@ -121,8 +135,8 @@ private:
         for (int y = 0; y < H; ++y)
             for (int x = 0; x < W; ++x) {
                 Px& p = px[size_t(y) * W + x];
-                int dr = p.r - canvas[(size_t(y) * W + x) * 3], dg = p.g - canvas[(size_t(y) * W + x) * 3 + 1], db = p.b - canvas[(size_t(y) * W + x) * 3 + 2];
-                p.e = (hasMask && !mask[size_t(y) * W + x]) ? 0 : dr * dr + dg * dg + db * db;
+                int dr = p.r0 - canvas[(size_t(y) * W + x) * 3], dg = p.g0 - canvas[(size_t(y) * W + x) * 3 + 1], db = p.b0 - canvas[(size_t(y) * W + x) * 3 + 2];
+                p.e = (hasMask && !mask[size_t(y) * W + x]) ? 0 : (dr * dr + dg * dg + db * db) * p.w;
                 tileErr[size_t(y / kTile) * tx + x / kTile] += p.e;
             }
         for (int y = 0; y < H; ++y) rebuildRowE(y, 0);
@@ -130,7 +144,7 @@ private:
     // recalcula el prefijo del error de la fila y desde x0 (los demas prefijos no dependen del lienzo)
     void rebuildRowE(int y, int x0) {
         Acc* row = &pre[size_t(y) * (W + 1)];
-        int32_t acc = row[x0].e;
+        int64_t acc = row[x0].e;
         for (int x = x0; x < W; ++x) { acc += px[size_t(y) * W + x].e; row[x + 1].e = acc; }
     }
 
@@ -181,7 +195,7 @@ private:
             if (hasMask && invPrefix[size_t(y) * (W + 1) + xe + 1] - invPrefix[size_t(y) * (W + 1) + xs] > 0) { touchesHole = true; return; }
             const Acc* a0 = &pre[size_t(y) * (W + 1) + size_t(xs)]; const Acc* a1 = &pre[size_t(y) * (W + 1) + size_t(xe) + 1];
             sr += double(a1->r - a0->r); sg += double(a1->g - a0->g); sb += double(a1->b - a0->b); stt += double(a1->tt - a0->tt); se += double(a1->e - a0->e);
-            n += xe - xs + 1;
+            n += double(a1->w - a0->w);
         });
         Ev e;
         if (touchesHole || n < 1) return e;       // nunca sobre transparente
@@ -196,8 +210,8 @@ private:
             for (int x = xs; x <= xe; ++x) {
                 size_t i = size_t(y) * W + x;
                 canvas[i * 3] = R; canvas[i * 3 + 1] = G; canvas[i * 3 + 2] = B;
-                int dr = px[i].r - R, dg = px[i].g - G, db = px[i].b - B;
-                px[i].e = (hasMask && !mask[i]) ? 0 : dr * dr + dg * dg + db * db;
+                int dr = px[i].r0 - R, dg = px[i].g0 - G, db = px[i].b0 - B;
+                px[i].e = (hasMask && !mask[i]) ? 0 : (dr * dr + dg * dg + db * db) * px[i].w;
             }
             rebuildRowE(y, xs);
             bx0 = std::min(bx0, xs); bx1 = std::max(bx1, xe); by0 = std::min(by0, y); by1 = std::max(by1, y);

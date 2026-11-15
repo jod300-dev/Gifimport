@@ -1,3 +1,16 @@
+# v0.5.8-beta
+- **Analisis con el GIF REAL (catgirl pat, 360x334, 32 frames) y 11 informes nuevos.** Resultado: en la 0.5.7 el filtro anti-dithering casi no tocaba el grano de ese GIF (el 54 % de los pixeles vecinos saltan >40 niveles: dithering muy fuerte,
+  tipico de los GIF de gif-makers online; mi GIF de prueba tenia un dithering mucho mas suave y el filtro estaba afinado para el). Por eso todos los metodos seguian ~15,7 dB y con "ruido"/cubos: se dibujaba el grano.
+  - **Filtro adaptativo** (`lay::chooseDenoise`): mide el ruido del GIF (diferencia media entre vecinos que no son borde: pixel art limpio 0-2, GIF de este tipo 30) y elige: sin filtro (<2,5), suave (<6), medio (<18) o fuerte (>=18: bilateral 7x7, sigma color 50, 2 pasadas).
+    Con tu GIF el objetivo queda limpio (contornos y rellenos planos) y las zonas se vuelven faciles de representar. Informe: "ruido/dithering medido".
+  - **Peso de bordes en el pintor** (`edgeWeight` = 3 por defecto): los pixeles junto a un contorno marcado pesan hasta 4 veces en la eleccion de formas y en el color medio, asi que los objetos se gastan en contornos y dedos en vez de en manchas. El PSNR baja ~0,4 dB (la metrica no premia contornos) pero los contornos se ven.
+    Con pesos 1 el resultado es identico al anterior (hash comprobado). Opciones `sizeFloor` (tamano final del pintor segun presupuesto; probado, sin mejora clara: desactivado).
+  - **Duracion de calculo: dos niveles nuevos, Extremo y Ultra** (busqueda de 256x512 / 512x1024 candidatos). Medido en tu GIF a 1000 objetos/frame (PSNR vs el objetivo limpio): Normal 18,7 | Maximo 20,3 | Extremo 20,7 | Ultra 20,9 dB (Ultra ~4x mas lento que Normal). Aumentar la duracion es la forma mas segura de ganar detalle a cualquier presupuesto.
+  - **20 y 27 (vidas)**: estimacion mas prudente del area futura para que los ultimos frames no se queden sin formas. Siguen siendo metodos para GIF de cambios lentos; con movimiento casi total como este (cambia el 50-70 % de la imagen en cada frame) 18/19/21/22/24/25/29 rinden mas.
+  - **26** sigue siendo para ciclos de color/destellos: con movimiento real deja halos fantasma (las formas son fijas).
+- Medido en el GIF real (PSNR contra el objetivo limpio, 300 obj/frame): 18 -> 18,1 dB, 21 -> 17,4, 26 -> 17,8; a 1000 obj/frame: 18 -> 21,3, 21 -> 21,3, 26 -> 19,0.
+- NO verificado en GD real ni compilado con Geode (solo mi simulador y compilacion con g++ imitando las macros de Windows).
+
 # v0.5.7-beta
 - **Analisis de los 11 informes reales (metodos 18-29 con el GIF de la catgirl 360x334, 300 obj/frame): todos daban ~15 dB y se veian "blandos", sin contornos.** Causas encontradas y arregladas:
   - **El filtro de ruido (mediana 3x3) borraba las lineas finas y convertia el dithering en manchas.** Ahora es un filtro bilateral 5x5 anti-dithering que respeta los bordes (`lay::bilateral5`, ajuste "Quitar ruido del GIF"). Medido contra los frames LIMPIOS en un GIF con dithering Bayer:

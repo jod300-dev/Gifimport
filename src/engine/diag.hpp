@@ -211,6 +211,7 @@ inline Output build(const Input& in) {
       << "hilos: " << in.threads << "  tiempo de calculo: ";
     if (in.calcSeconds >= 0) R << std::setprecision(2) << in.calcSeconds << " s\n"; else R << "(reutilizado de la vista previa)\n";
     R << in.settingsText << "\n";
+    if (in.layered) R << "ruido/dithering medido del GIF: " << std::setprecision(1) << in.layered->noise << "  (< 2,5 limpio: sin filtro; < 6 suave; < 18 medio; >= 18 fuerte)\n\n";
     R << "## GIF\narchivo: " << g.srcW << "x" << g.srcH << "  guardado a " << g.w << "x" << g.h << "  frames: " << g.frames.size() << "\nretardos (ms): ";
     for (int d : g.delaysMs) R << d << ' ';
     R << "\n## Plan de frames usados (" << N << ")\nindice_gif:duracion_s  ";

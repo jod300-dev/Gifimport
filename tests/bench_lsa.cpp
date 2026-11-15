@@ -28,6 +28,7 @@ int main(int argc, char** argv) {
 #else
     (void)dur;
 #endif
+    if (getenv("EDGEW")) lo.edgeWeight = float(atof(getenv("EDGEW"))); if (getenv("SIZEK")) lo.sizeFloor = float(atof(getenv("SIZEK")));
     if (getenv("DMODE")) lo.denoiseMode = atoi(getenv("DMODE"));
     if (getenv("DENOISE")) lo.denoise = atoi(getenv("DENOISE")) != 0;
     auto t0 = std::chrono::steady_clock::now();

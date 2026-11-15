@@ -347,7 +347,7 @@ inline bool lifetimesRun(const Ctx& c, double tau0, long Bobj, bool refine, std:
     // reserva del 7 % para los rellenos de cobertura; el resto se reparte a densidad uniforme (antes un frame con pocos cambios en el estimador gastaba de mas
     // al principio y los ultimos frames se quedaban sin formas nuevas: 15 dB en el ultimo frame)
     std::vector<Live> alive; fin.clear(); double tau = tau0; long pool = long(double(Bobj) * 0.93), used = 0; double planned = 0;
-    double sumCnt = 0, sumWt = 0;                                                    // calibra el area futura estimada con la real
+    double sumCnt = 0, sumWt = 0; int nSeen = 0;                                      // calibra el area futura estimada con la real
     const int rounds = std::clamp(c.quality, 1, 3);
     for (int i = 0; i < N; ++i) {
         if (isCancelled(c.prog)) { cancelled = true; return false; }
@@ -404,13 +404,16 @@ inline bool lifetimesRun(const Ctx& c, double tau0, long Bobj, bool refine, std:
         // y el margen). Con a priori 2 que se corrige con lo observado, para no subestimar el area futura al principio.
         const double priorW = 2.0 * mean;
         const double ratio = std::clamp((sumCnt + 2.0 * priorW) / (sumWt + priorW), 1.0, 4.0);
-        const double futArea = cum[size_t(i) + 1] * ratio;
+        // area futura: lo estimado por la diferencia entre frames, pero nunca menos del 60 % de lo que han necesitado de media los frames ya vistos
+        // (en GIF con mucho movimiento el estimador se queda corto y los ultimos frames se quedaban sin formas)
+        const double meanSeen = nSeen > 0 ? sumCnt / double(nSeen) : 0.3 * double(np);
+        double futArea = 0; for (int j = i + 1; j < N; ++j) futArea += std::max(ratio * wt[size_t(j)], 0.6 * meanSeen);
         int b = int(std::max(0.0, double(pool) * double(cnt) / std::max(1e-9, double(cnt) + futArea)));
         b = std::min(b, lay::areaBudget(cnt, 100000));
         // reserva minima para los frames que faltan: ninguno se queda sin formas nuevas aunque el area futura se haya subestimado
         { const long keepFor = long(std::max(0.0, double(Bobj) * 0.9 / double(N) * 0.65)) * long(N - 1 - i); if (cnt > 0 && pool - keepFor > 0) b = int(std::min<long>(b, pool - keepFor)); else if (cnt > 0) b = std::min<int>(b, 4); }
         if (cnt > 0) b = std::max(b, std::min<int>(4, int(pool)));
-        if (i > 0) { sumCnt += double(cnt); sumWt += wt[size_t(i)]; }
+        if (i > 0) { sumCnt += double(cnt); sumWt += wt[size_t(i)]; ++nSeen; }
         if (cnt > 0 && b > 0 && pool > 0) {
             Image under = canvas; std::vector<uint8_t> valid(np, 0); bool any = false;
             for (size_t p = 0; p < np; ++p) { valid[p] = canvas.rgba[p * 4 + 3] > 0; any |= valid[p] != 0; }
@@ -532,7 +535,7 @@ inline LayeredAnim buildLsaAnim(const GifData& g, const GifPlan& plan, const Opt
     if (lo.method == 9) { ok = lsa::buildAuto(c, *A, chosen); }
     else { ok = lsa::buildKind(c, *A, lo.method); if (ok) lsa::finish(c, *A); }
     if (isCancelled(prog)) { R.cancelled = true; return R; }
-    R.W = c.W; R.H = c.H; R.frames = N;
+    R.W = c.W; R.H = c.H; R.frames = N; R.noise = c.noise;
     R.still.rasterW = c.W; R.still.rasterH = c.H; R.still.aspect = float(c.W) / float(c.H);
     if (!ok || !A->ok()) { R.note = A->note.empty() ? "No se pudo calcular el metodo" : A->note; return R; }
     R.psnr = A->psnr; R.psnrAvg = A->psnrAvg; R.psnrMin = A->psnrMin; R.note = A->note;

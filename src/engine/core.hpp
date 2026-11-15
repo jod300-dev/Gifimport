@@ -63,6 +63,8 @@ struct Options {
     int maxRaster = 768;                 // lado máximo del raster interno
     int alphaThreshold = 128;            // alfa >= umbral => píxel opaco
     int quality = 2;                     // 0 rápido, 1 normal, 2 alto, 3 máximo
+    float sizeFloor = 0.f;               // 0 = desactivado. >0: tamano final de las formas del pintor = sizeFloor*sqrt(area/objetos) (sin confeti con pocos objetos)
+    float edgeWeight = 0.f;              // 0 = desactivado. >0: los pixeles de borde pesan hasta 1+edgeWeight veces en el pintor (contornos mas nitidos)
     float hybridFraction = -1.f;         // fracción del presupuesto para la base BSP del híbrido (<0 = automática)
     uint32_t seed = 1337;
     bool invertInk = false;              // estilos monocromos: tinta blanca sobre fondo negro

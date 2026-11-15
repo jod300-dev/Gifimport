@@ -51,6 +51,8 @@ struct LayeredOptions {
     int painter = 1;          // 1 = tras el BSP, rectangulos rotados guiados por el error (solo GIF sin transparencia)
     float reuse = 0.005f;     // un frame reutiliza el parche de otro (mismo rest) si difieren en menos de esta fraccion del lienzo (0 = no reutilizar)
     float stillBsp = 0.55f;   // idem para el fondo (el fondo es grande y regular: mas BSP)
+    float sizeFloor = 0.f;    // v0.5.7: tamano final del pintor segun el presupuesto (0 = igual que antes)
+    float edgeWeight = 3.f;   // v0.5.7: peso extra de los pixeles de borde en el pintor (0 = igual que antes)
     float bspFrac = 0.15f;    // fraccion del presupuesto de cada capa que usa la base BSP (el resto: rectangulos rotados)
     bool tree = false;        // metodo 19: arbol de deltas (cada frame se predice del frame mas parecido, no de un rest fijo)
     int method = 0;           // 0 = metodos 18/19; 1..10 = metodos 20..29 (capas LSA, ver lsa_methods.hpp)
@@ -64,6 +66,7 @@ struct LayeredOptions {
 struct LayeredAnim {
     int W = 0, H = 0;                   // raster de trabajo comun a todas las capas
     int frames = 0;
+    double noise = 0;                   // ruido/dithering medido del GIF (informe)
     Result still;
     std::vector<Result> rests;          // K capas
     std::vector<Result> patches;        // indexado por frame; solo tienen objetos los frames "representantes" (shapes vacio = nada que pintar)
@@ -297,36 +300,57 @@ inline void kMedoids(const std::vector<float>& D, int N, int K, std::vector<int>
 // Mediana 3x3 por canal entre pixeles opacos (quita el ruido de dither conservando los bordes).
 // Quita el dithering respetando los bordes: media de la ventana 5x5 ponderada por cercania espacial y de COLOR (filtro bilateral). Las parejas de colores de un
 // patron de dither (distancia pequena) se promedian en un tono suave; un contorno oscuro junto a un relleno claro (distancia grande) casi no se mezcla.
-#ifndef BIL_SIGR
-#define BIL_SIGR 26.0
-#endif
-#ifndef BIL_SIGS
-#define BIL_SIGS 1.0
-#endif
-inline Image bilateral5(const Image& s, int thr, double sigR = BIL_SIGR, double sigS = BIL_SIGS) {
-    Image o = s; static thread_local std::vector<float> lut; static thread_local double lastSig = -1;
+// Filtro bilateral (media ponderada por cercania espacial y de COLOR): promedia las parejas de colores de un patron de dither y casi no mezcla un contorno oscuro con su relleno.
+inline Image bilateralN(const Image& s0, int thr, int rad, double sigR, double sigS, int iters) {
+    static thread_local std::vector<float> lut; static thread_local double lastSig = -1;
     const int NL = 4096;                                                         // d2 / 48 (d2 max = 3*255^2 = 195075 -> 4064)
     if (lastSig != sigR) { lut.assign(size_t(NL), 0.f); for (int i = 0; i < NL; ++i) lut[size_t(i)] = float(std::exp(-(double(i) * 48.0) / (2.0 * sigR * sigR))); lastSig = sigR; }
-    float sw[5][5]; for (int dy = -2; dy <= 2; ++dy) for (int dx = -2; dx <= 2; ++dx) sw[dy + 2][dx + 2] = float(std::exp(-(dx * dx + dy * dy) / (2.0 * sigS * sigS)));
-    for (int y = 0; y < s.h; ++y)
-        for (int x = 0; x < s.w; ++x) {
-            const uint8_t* c = s.at(x, y); if (c[3] < thr) continue;
-            float acc[3] = {0, 0, 0}, wsum = 0;
-            for (int dy = -2; dy <= 2; ++dy) {
-                const int yy = y + dy; if (yy < 0 || yy >= s.h) continue;
-                for (int dx = -2; dx <= 2; ++dx) {
-                    const int xx = x + dx; if (xx < 0 || xx >= s.w) continue;
-                    const uint8_t* p = s.at(xx, yy); if (p[3] < thr) continue;
-                    const int d0 = int(p[0]) - c[0], d1 = int(p[1]) - c[1], d2 = int(p[2]) - c[2];
-                    const float w = sw[dy + 2][dx + 2] * lut[size_t(std::min(NL - 1, (d0 * d0 + d1 * d1 + d2 * d2) / 48))];
-                    acc[0] += w * p[0]; acc[1] += w * p[1]; acc[2] += w * p[2]; wsum += w;
+    rad = std::clamp(rad, 1, 4); const int K = 2 * rad + 1; std::vector<float> sw(size_t(K) * K);
+    for (int dy = -rad; dy <= rad; ++dy) for (int dx = -rad; dx <= rad; ++dx) sw[size_t(dy + rad) * K + size_t(dx + rad)] = float(std::exp(-(dx * dx + dy * dy) / (2.0 * sigS * sigS)));
+    Image cur = s0, o = s0;
+    for (int it = 0; it < iters; ++it) {
+        for (int y = 0; y < cur.h; ++y)
+            for (int x = 0; x < cur.w; ++x) {
+                const uint8_t* c = cur.at(x, y); if (c[3] < thr) continue;
+                float acc[3] = {0, 0, 0}, wsum = 0;
+                for (int dy = -rad; dy <= rad; ++dy) {
+                    const int yy = y + dy; if (yy < 0 || yy >= cur.h) continue;
+                    for (int dx = -rad; dx <= rad; ++dx) {
+                        const int xx = x + dx; if (xx < 0 || xx >= cur.w) continue;
+                        const uint8_t* p = cur.at(xx, yy); if (p[3] < thr) continue;
+                        const int d0 = int(p[0]) - c[0], d1 = int(p[1]) - c[1], d2 = int(p[2]) - c[2];
+                        const float w = sw[size_t(dy + rad) * K + size_t(dx + rad)] * lut[size_t(std::min(NL - 1, (d0 * d0 + d1 * d1 + d2 * d2) / 48))];
+                        acc[0] += w * p[0]; acc[1] += w * p[1]; acc[2] += w * p[2]; wsum += w;
+                    }
                 }
+                uint8_t* q = o.at(x, y);
+                for (int k = 0; k < 3; ++k) q[k] = uint8_t(std::clamp(acc[k] / wsum + 0.5f, 0.f, 255.f));
             }
-            uint8_t* q = o.at(x, y);
-            for (int k = 0; k < 3; ++k) q[k] = uint8_t(std::clamp(acc[k] / wsum + 0.5f, 0.f, 255.f));
-        }
+        cur = o;
+    }
     return o;
 }
+// Ruido de un frame: media de la diferencia (canal maximo) entre pixeles vecinos que NO son un borde (<= 70). Pixel art limpio ~0-2; GIF con dithering fuerte (los de gif-makers online) 20-40.
+inline double noiseOf(const Image& s, int thr) {
+    double sum = 0; size_t n = 0;
+    for (int y = 0; y + 1 < s.h; ++y) for (int x = 0; x + 1 < s.w; ++x) {
+        const uint8_t* a = s.at(x, y); if (a[3] < thr) continue;
+        for (int k = 0; k < 2; ++k) { const uint8_t* b = k ? s.at(x, y + 1) : s.at(x + 1, y); if (b[3] < thr) continue;
+            const int d = std::max({std::abs(int(a[0]) - b[0]), std::abs(int(a[1]) - b[1]), std::abs(int(a[2]) - b[2])}); if (d <= 70) { sum += d; ++n; } }
+    }
+    return n ? sum / double(n) : 0.0;
+}
+struct DenoiseCfg { int mode = 0; int rad = 2, iters = 1; double sigR = 26, sigS = 1.0, noise = 0; };   // mode: 0 nada, 1 bilateral
+// Fuerza del filtro segun el ruido medido (promedio de hasta 3 frames): limpio -> no se toca (el pixel art queda exacto); dithering fuerte -> 2 pasadas amplias.
+inline DenoiseCfg chooseDenoise(const std::vector<Image>& samples, int thr) {
+    DenoiseCfg c; double n = 0; for (const Image& im : samples) n += noiseOf(im, thr); if (!samples.empty()) n /= double(samples.size()); c.noise = n;
+    if (n < 2.5) { c.mode = 0; }
+    else if (n < 6.0) { c.mode = 1; c.rad = 2; c.iters = 1; c.sigR = 18; c.sigS = 1.0; }
+    else if (n < 18.0) { c.mode = 1; c.rad = 2; c.iters = 1; c.sigR = 34; c.sigS = 1.2; }
+    else { c.mode = 1; c.rad = 3; c.iters = 2; c.sigR = 50; c.sigS = 1.5; }
+    return c;
+}
+inline Image applyDenoise(const Image& s, int thr, const DenoiseCfg& c) { return c.mode == 0 ? s : bilateralN(s, thr, c.rad, c.sigR, c.sigS, c.iters); }
 inline Image median3(const Image& s, int thr) {
     Image o = s;
     for (int y = 0; y < s.h; ++y)
@@ -465,6 +489,22 @@ inline std::vector<std::array<uint8_t, 3>> buildPalette(const std::map<uint32_t,
 // (lazo cerrado). Despues se recolorea cada forma con lo que realmente queda visible, se quitan las tapadas y ese
 // presupuesto se reinvierte. `layerImg` = lo que debe cubrir la capa (con huecos); `target` = el frame completo (opaco);
 // `baseCanvas` = composite de las capas de abajo (nullptr = lienzo plano de color medio).
+// Peso por pixel segun la fuerza del borde (gradiente del canal maximo): 1 en zonas planas, hasta 1+boost junto a un contorno marcado (con 1 px de margen)
+inline std::vector<uint8_t> edgeWeights(const Image& t, float boost) {
+    const int W = t.w, H = t.h; std::vector<float> g(size_t(W) * H, 0.f);
+    for (int y = 0; y < H; ++y) for (int x = 0; x < W; ++x) {
+        const uint8_t* l = t.at(std::max(0, x - 1), y); const uint8_t* r = t.at(std::min(W - 1, x + 1), y);
+        const uint8_t* u = t.at(x, std::max(0, y - 1)); const uint8_t* d = t.at(x, std::min(H - 1, y + 1));
+        int m = 0; for (int k = 0; k < 3; ++k) m = std::max({m, std::abs(int(r[k]) - l[k]), std::abs(int(d[k]) - u[k])});
+        g[size_t(y) * W + x] = std::clamp((float(m) - 30.f) / 90.f, 0.f, 1.f);
+    }
+    std::vector<uint8_t> w(size_t(W) * H, 1);
+    for (int y = 0; y < H; ++y) for (int x = 0; x < W; ++x) {
+        float m = 0; for (int dy = -1; dy <= 1; ++dy) for (int dx = -1; dx <= 1; ++dx) { const int xx = x + dx, yy = y + dy; if (xx >= 0 && yy >= 0 && xx < W && yy < H) m = std::max(m, g[size_t(yy) * W + xx]); }
+        w[size_t(y) * W + x] = uint8_t(std::clamp(1.f + boost * m + 0.5f, 1.f, 8.f));
+    }
+    return w;
+}
 inline Result traceHybrid(const Image& layerImg, const Image& target, const Image* baseCanvas, int budget,
                           const Options& base, double bspFrac, int quality, uint32_t seed) {
     const int W = target.w, H = target.h;
@@ -478,6 +518,8 @@ inline Result traceHybrid(const Image& layerImg, const Image& target, const Imag
         mr = uint8_t(r / std::max<size_t>(1, n) + 0.5); mg = uint8_t(g / std::max<size_t>(1, n) + 0.5); mb = uint8_t(b / std::max<size_t>(1, n) + 0.5);
     }
     Geo geo(target, seed);
+    if (base.edgeWeight > 0.f) geo.setWeights(edgeWeights(target, base.edgeWeight));
+    if (base.sizeFloor > 0.f) geo.setSizeFloor(base.sizeFloor);
     auto setCanvas = [&](const std::vector<Shape>& sh) {
         Image c;
         if (baseCanvas) c = *baseCanvas;
@@ -577,11 +619,14 @@ inline LayeredAnim buildLayered(const GifData& g, const GifPlan& plan, const Opt
     A.W = W; A.H = H; A.frames = N;
 
     std::vector<Image> orig; orig.resize(size_t(N));              // para medir el PSNR
-    std::vector<Image> fr; fr.resize(size_t(N));                  // lo que se traza (con o sin mediana 3x3)
+    std::vector<Image> fr; fr.resize(size_t(N));                  // lo que se traza (con o sin filtro anti-ruido)
+    lay::DenoiseCfg dcfg;
+    if (lo.denoise && lo.denoiseMode == 1) { std::vector<Image> smp; for (int k : {0, N / 2, N - 1}) { Image im = resizeArea(g.frames[size_t(plan.idx[size_t(std::clamp(k, 0, N - 1))])], W, H); if (base.grayscale) im = toGrayscale(im); smp.push_back(std::move(im)); } dcfg = lay::chooseDenoise(smp, thr); }
+    A.noise = dcfg.noise;
     lay::parallelFor(N, threads, [&](int i) {
         Image im = resizeArea(g.frames[size_t(plan.idx[size_t(i)])], W, H);
         if (base.grayscale) im = toGrayscale(im);
-        fr[size_t(i)] = lo.denoise ? (lo.denoiseMode == 1 ? lay::bilateral5(im, thr) : lay::median3(im, thr)) : im;
+        fr[size_t(i)] = lo.denoise ? (lo.denoiseMode == 1 ? lay::applyDenoise(im, thr, dcfg) : lay::median3(im, thr)) : im;
         orig[size_t(i)] = std::move(im);
     });
     std::vector<Image> sm; sm.resize(size_t(N));
@@ -606,7 +651,7 @@ inline LayeredAnim buildLayered(const GifData& g, const GifPlan& plan, const Opt
     bool opaqueAll = true;
     for (int i = 0; i < N && opaqueAll; ++i) if (lay::opaqueCount(orig[size_t(i)], thr) != size_t(W) * H) opaqueAll = false;
     const bool usePainter = lo.painter != 0 && opaqueAll;
-    const int pq = std::clamp(base.quality, 0, 3);
+    const int pq = std::clamp(base.quality, 0, 5);
     const double bf = std::clamp<double>(lo.bspFrac, 0.05, 1.0);
     const Image smMed = lay::blur3(med, thr);
 

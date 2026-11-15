@@ -34,6 +34,8 @@ namespace {
         if (q == "Rapido") return 0;
         if (q == "Alto") return 2;
         if (q == "Maximo") return 3;
+        if (q == "Extremo") return 4;
+        if (q == "Ultra") return 5;
         return 1;
     }
     // sliders 0..1 <-> valor
@@ -826,7 +828,7 @@ void GifPopup::saveDiagnostics(std::shared_ptr<BuildJob> const& job, gdx::GifExp
         gdx::diag::Input in;
         in.chain = &chain; in.gif = job->gif.get(); in.plan = &job->plan; in.frames = &frames; in.layered = job->layered.get();
         in.settingsText = st.str(); in.methodName = m_methodLabel ? std::string(m_methodLabel->getString()) : std::string("?");
-        in.modVersion = "v0.5.7-beta"; in.when = when;
+        in.modVersion = "v0.5.8-beta"; in.when = when;
         in.platformText = std::string("plataforma: ")
 #ifdef GEODE_PLATFORM_NAME
             + GEODE_PLATFORM_NAME
