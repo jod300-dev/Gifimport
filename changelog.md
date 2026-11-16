@@ -1,3 +1,18 @@
+# v0.5.10-beta
+- **Colores planos (estilizado cel) en 18-29**: antes de trazar, todos los frames se reducen a una paleta corta (k-means con semillas k-means++ sobre todos los frames + filtro de moda 3x3 que limpia puntos aislados). Las formas salen de UN color limpio en lugar de manchas de tonos casi iguales
+  (el "ruido" y la suciedad de los trazos). Ajuste nuevo "Colores planos": Auto (14-34 colores con <= 1200 obj/frame, desactivado con mas), Pocos (14), Medios (24), Muchos (40), Desactivado. Con "Clasico 0.5.5" siempre desactivado.
+  PSNR a 300 obj/frame: igual (+-0,1 dB); a 1500 obj/frame -0,3/-0,6 dB (por eso Auto lo apaga con presupuestos altos).
+- **Aviso al colocar con < 900 objetos por frame**: "con el mismo total se ve mucho mas limpio con ~N frames de 1500 objetos (baja Frames maximos)". Medido en el GIF real con ~9,6k objetos en total (metodo 18, duracion Alto):
+  32 frames x 300 = basto y con parches sucios; 12 x 800 = contornos reconocibles; 6 x 1600 = limpio. El presupuesto TOTAL es lo que manda: pocos frames con muchos objetos se ven mucho mejor que muchos frames con pocos.
+
+# v0.5.9-beta
+- **Comprobado con la cadena real de tus diagnosticos (`tests/chain_check.cpp`): no hay error de z-order ni de generacion.** La cadena de GD que se coloco, simulada con el plan de frames exacto (min-delay 0,07), da el mismo PSNR que calculo el motor
+  (m18 15,71 vs 15,73 dB, m21 15,48 vs 15,51, m26 15,86 vs 15,86, m29 15,46 vs 15,51): lo que se coloca es lo que el motor calculo. Lo que se ve "cubico y sucio" es la calidad del propio trazado con 300 objetos/frame.
+- **Nuevo ajuste "Procesamiento de los metodos 18-29": Mejorado / Clasico 0.5.5.** "Clasico" devuelve el procesamiento de la 0.5.5 (mediana 3x3, sin peso de bordes, nivel de busqueda segun "Calidad de calculo"): el metodo 18 produce la MISMA cadena (hash identico) que la 0.5.5.
+  Se mantienen los arreglos de la paleta de canales y de 20/26/27. Medido en el GIF real (PSNR contra el objetivo limpio, Normal): 18 a 1000 obj/frame 19,5 (clasico) -> 20,1 (mejorado) -> 21,2 (Alto); 21 a 3000 obj/frame 22,2 -> 24,1 -> 25,4; el 21 pasa de 13,5 s a 5,1 s.
+- **Lo que hace falta para que se vea limpio** (catgirl 360x334, 32 frames, metodo 18, duracion Maximo): 1000 obj/frame (33k objetos en total) = contornos reconocibles con cubos; **2000 obj/frame (65k) = limpio**; **4000 obj/frame (100k) = casi como el original**.
+  Con 300 obj/frame (9,6k objetos en total) el limite es el propio presupuesto: no existe metodo que dibuje una escena de linea fina y movimiento casi total con tan pocos rectangulos. Sube "Maximo de objetos" en ajustes (estaba en 40000).
+
 # v0.5.8-beta
 - **Analisis con el GIF REAL (catgirl pat, 360x334, 32 frames) y 11 informes nuevos.** Resultado: en la 0.5.7 el filtro anti-dithering casi no tocaba el grano de ese GIF (el 54 % de los pixeles vecinos saltan >40 niveles: dithering muy fuerte,
   tipico de los GIF de gif-makers online; mi GIF de prueba tenia un dithering mucho mas suave y el filtro estaba afinado para el). Por eso todos los metodos seguian ~15,7 dB y con "ruido"/cubos: se dibujaba el grano.

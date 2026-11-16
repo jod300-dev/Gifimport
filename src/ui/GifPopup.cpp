@@ -479,6 +479,9 @@ gdx::LayeredOptions GifPopup::makeLayeredOptions() const {
     lo.firstChannel = gdx::kFirstColorChannel;                      // siempre desde el 2: el canal 1 nunca se usa
     lo.reuse = float(std::clamp(mod->getSettingValue<double>("layered-reuse"), 0.0, 10.0) / 100.0);
     lo.effort = effortFromSetting();                                // duracion de calculo (18-29)
+    lo.classic = mod->getSettingValue<std::string>("layered-mode") != "Mejorado";
+    { auto f = mod->getSettingValue<std::string>("layered-flat");                      // colores planos (estilizado cel)
+      lo.posterize = f == "Desactivado" ? 0 : f == "Pocos (14)" ? 14 : f == "Medios (24)" ? 24 : f == "Muchos (40)" ? 40 : -1; }   // "Clasico 0.5.5"
     return lo;
 }
 
@@ -497,6 +500,7 @@ std::string GifPopup::layeredKey() const {
     key += std::to_string(mod->getSettingValue<double>("layered-reuse"));
     key += "|" + mod->getSettingValue<std::string>("quality");
     key += "|E" + std::to_string(effortFromSetting());
+    key += "|M" + mod->getSettingValue<std::string>("layered-mode") + "|F" + mod->getSettingValue<std::string>("layered-flat");
     key += treeMode() ? "|T" : "|L";
     key += "|M" + std::to_string(lsaKind());
     key += m_chan ? "|c" : "|h";
@@ -812,7 +816,7 @@ void GifPopup::saveDiagnostics(std::shared_ptr<BuildJob> const& job, gdx::GifExp
         for (const char* k : {"speed", "min-delay", "bleed", "layered-reuse"}) st << k << " = " << mod->getSettingValue<double>(k) << "\n";
         for (const char* k : {"triggers-at-start", "flip-rotation", "select-after", "invert-ink", "layered-rotated", "layered-denoise", "save-report"})
             st << k << " = " << (mod->getSettingValue<bool>(k) ? "true" : "false") << "\n";
-        for (const char* k : {"place-mode", "quality", "compute-effort"}) st << k << " = " << mod->getSettingValue<std::string>(k) << "\n";
+        for (const char* k : {"place-mode", "quality", "compute-effort", "layered-mode", "layered-flat"}) st << k << " = " << mod->getSettingValue<std::string>(k) << "\n";
         st << "[ventana]\nindice de metodo = " << m_method << " (metodo " << (m_method + 1) << ")\nobjetos por frame = " << m_perFrame << "\nlado largo (u) = " << m_sizeU
            << "\nframes maximos = " << m_maxFrames << "\ngris = " << m_gray << "\ncanales = " << m_chan << "\ntamano de paleta = " << paletteSize() << "\n";
 
@@ -828,7 +832,7 @@ void GifPopup::saveDiagnostics(std::shared_ptr<BuildJob> const& job, gdx::GifExp
         gdx::diag::Input in;
         in.chain = &chain; in.gif = job->gif.get(); in.plan = &job->plan; in.frames = &frames; in.layered = job->layered.get();
         in.settingsText = st.str(); in.methodName = m_methodLabel ? std::string(m_methodLabel->getString()) : std::string("?");
-        in.modVersion = "v0.5.8-beta"; in.when = when;
+        in.modVersion = "v0.5.10-beta"; in.when = when;
         in.platformText = std::string("plataforma: ")
 #ifdef GEODE_PLATFORM_NAME
             + GEODE_PLATFORM_NAME
@@ -881,6 +885,10 @@ void GifPopup::finishBuild(std::shared_ptr<BuildJob> job) {
     p.eo.originX = origin.x;
     p.eo.originY = origin.y;
     const int N = job->plan.count();
+    if (job->layered && N >= 4 && m_perFrame < 900) {                    // aviso honesto: con pocos objetos por frame el dibujo sale basico
+        const int total = m_perFrame * N, fewer = std::max(2, total / 1500);
+        Notification::create("Con " + std::to_string(m_perFrame) + " objetos por frame el resultado sale basico. Con el mismo total (" + std::to_string(total) + ") se ve mucho mas limpio con ~" + std::to_string(fewer) + " frames de 1500 objetos (baja \"Frames maximos\").", NotificationIcon::Info, 7.f)->show();
+    }
     p.baseGroup = std::max(this->maxUsedGroup() + 1, std::clamp(mod->getSettingValue<int>("first-group"), 1, 9000));
     if (mod->getSettingValue<bool>("triggers-at-start")) {
         p.trigX = -30.0;

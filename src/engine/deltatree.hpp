@@ -126,6 +126,7 @@ inline LayeredAnim buildTree(const GifData& g, const GifPlan& plan, const Option
         fr[size_t(i)] = lo.denoise ? (lo.denoiseMode == 1 ? lay::applyDenoise(im, thr, dcfg) : lay::median3(im, thr)) : im;
         orig[size_t(i)] = std::move(im);
     });
+    if (lo.posterize > 1) lay::posterizeFrames(fr, thr, lo.posterize, base.seed);
     std::vector<Image> sm; sm.resize(size_t(N));
     lay::parallelFor(N, threads, [&](int i) { sm[size_t(i)] = lay::blur3(fr[size_t(i)], thr); });
     report(prog, 0.04f);
@@ -441,8 +442,11 @@ inline void capAnim(LayeredAnim& A, int maxTotal) {
     }
 }
 
-inline LayeredAnim buildAnim(const GifData& g, const GifPlan& plan, const Options& base0, const LayeredOptions& lo, Progress* prog, int threads) {
-    Options base = base0; base.quality = std::clamp(lo.effort, 0, 5); base.edgeWeight = lo.edgeWeight; base.sizeFloor = lo.sizeFloor;                  // 18-29: la duracion de calculo la fija su propio ajuste
+inline LayeredAnim buildAnim(const GifData& g, const GifPlan& plan, const Options& base0, const LayeredOptions& lo0, Progress* prog, int threads) {
+    LayeredOptions lo = lo0;
+    if (lo.classic) { lo.denoiseMode = 0; lo.edgeWeight = 0.f; lo.sizeFloor = 0.f; lo.posterize = 0; }
+    if (lo.posterize < 0) lo.posterize = lo.perFrame <= 1200 ? std::clamp(14 + lo.perFrame / 60, 14, 34) : 0;      // auto: colores planos solo cuando hay pocos objetos (con muchos se pierde detalle de degradado)          // como la 0.5.5: mediana 3x3, sin pesos
+    Options base = base0; base.quality = lo.classic ? std::clamp(std::max(base0.quality, 1), 0, 3) : std::clamp(lo.effort, 0, 5); base.edgeWeight = lo.edgeWeight; base.sizeFloor = lo.sizeFloor;                  // 18-29: la duracion de calculo la fija su propio ajuste
     if (lo.method > 0) return buildLsaAnim(g, plan, base, lo, prog, threads);          // metodos 20-29 (cierre y tope de objetos incluidos)
     LayeredAnim A = lo.tree ? buildTree(g, plan, base, lo, prog, threads) : buildLayered(g, plan, base, lo, prog, threads);
     capAnim(A, lo.maxTotal);

@@ -52,12 +52,14 @@ struct LayeredOptions {
     float reuse = 0.005f;     // un frame reutiliza el parche de otro (mismo rest) si difieren en menos de esta fraccion del lienzo (0 = no reutilizar)
     float stillBsp = 0.55f;   // idem para el fondo (el fondo es grande y regular: mas BSP)
     float sizeFloor = 0.f;    // v0.5.7: tamano final del pintor segun el presupuesto (0 = igual que antes)
+    int posterize = -1;       // v0.5.9: -1 = auto (presupuestos <= 1200 obj/frame: 14-34 colores planos), 0 = no, K>1 = reduce todos los frames a K colores planos antes de trazar (aspecto limpio con pocos objetos)
     float edgeWeight = 3.f;   // v0.5.7: peso extra de los pixeles de borde en el pintor (0 = igual que antes)
     float bspFrac = 0.15f;    // fraccion del presupuesto de cada capa que usa la base BSP (el resto: rectangulos rotados)
     bool tree = false;        // metodo 19: arbol de deltas (cada frame se predice del frame mas parecido, no de un rest fijo)
     int method = 0;           // 0 = metodos 18/19; 1..10 = metodos 20..29 (capas LSA, ver lsa_methods.hpp)
     int channels = 0;         // >0: colores en CANALES (sin HSV): paleta de hasta este numero de colores; 0 = HSV
     int firstChannel = 2;     // primer canal de la paleta (el canal 1 NUNCA se usa)
+    bool classic = false;     // v0.5.8: procesamiento CLASICO de la 0.5.5 en 18-29 (mediana 3x3, sin peso de bordes, "Calidad de calculo" de siempre). La paleta de canales y los arreglos de 20/27/26 se mantienen.
     int effort = 1;           // v0.5.6: duracion de calculo de 18-29: 0 Rapido (busqueda corta), 1 Normal (como antes), 2 Alto, 3 Maximo
     int denoiseMode = 1;      // 0 = mediana 3x3 (v0.5.6 y antes: borraba lineas finas), 1 = bilateral anti-dithering que respeta bordes (v0.5.7)
     bool denoise = true;      // mediana 3x3 antes de trazar (quita el dither del GIF; el PSNR se mide contra el original)
@@ -300,6 +302,46 @@ inline void kMedoids(const std::vector<float>& D, int N, int K, std::vector<int>
 // Mediana 3x3 por canal entre pixeles opacos (quita el ruido de dither conservando los bordes).
 // Quita el dithering respetando los bordes: media de la ventana 5x5 ponderada por cercania espacial y de COLOR (filtro bilateral). Las parejas de colores de un
 // patron de dither (distancia pequena) se promedian en un tono suave; un contorno oscuro junto a un relleno claro (distancia grande) casi no se mezcla.
+// Estilizado "cel": reduce TODOS los frames a una paleta corta de K colores planos (k-means sobre una muestra de todos los frames, con semillas k-means++ que respetan
+// los colores pequenos pero importantes: contorno oscuro, ojos) y limpia los puntos aislados con un filtro de moda 3x3. Con pocos objetos las formas salen de UN color
+// limpio en vez de manchas de tonos casi iguales (el "ruido" y la suciedad de los trazos).
+inline void posterizeFrames(std::vector<Image>& fr, int thr, int K, uint32_t seed) {
+    if (fr.empty() || K < 2) return;
+    struct C3 { float r, g, b; };
+    std::vector<C3> samp; const size_t total = fr.size() * size_t(fr[0].w) * size_t(fr[0].h); const size_t stride = std::max<size_t>(1, total / 60000);
+    { size_t k = 0; for (const Image& im : fr) for (size_t i = 0; i < size_t(im.w) * im.h; ++i, ++k) if (k % stride == 0 && im.rgba[i * 4 + 3] >= thr) samp.push_back({float(im.rgba[i * 4]), float(im.rgba[i * 4 + 1]), float(im.rgba[i * 4 + 2])}); }
+    if (samp.size() < size_t(K) * 4) return;
+    Rng rng(seed ^ 0x5bd1e995u); std::vector<C3> cen; cen.push_back(samp[rng.next() % samp.size()]);
+    std::vector<double> d2(samp.size(), 1e30);
+    for (int k = 1; k < K; ++k) {
+        double sum = 0; for (size_t i = 0; i < samp.size(); ++i) { const double a = samp[i].r - cen.back().r, b = samp[i].g - cen.back().g, c = samp[i].b - cen.back().b; d2[i] = std::min(d2[i], a * a + b * b + c * c); sum += d2[i]; }
+        if (sum <= 0) break; double r = double(rng.next() % 1000003u) / 1000003.0 * sum, acc = 0; size_t pick = samp.size() - 1;
+        for (size_t i = 0; i < samp.size(); ++i) { acc += d2[i]; if (acc >= r) { pick = i; break; } }
+        cen.push_back(samp[pick]);
+    }
+    const int Kc = int(cen.size());
+    for (int it = 0; it < 10; ++it) {
+        std::vector<double> sr(size_t(Kc), 0), sg(size_t(Kc), 0), sb(size_t(Kc), 0), cn(size_t(Kc), 0);
+        for (const C3& p : samp) { int bk = 0; double bd = 1e30; for (int k = 0; k < Kc; ++k) { const double a = p.r - cen[size_t(k)].r, b = p.g - cen[size_t(k)].g, c = p.b - cen[size_t(k)].b, d = a * a + b * b + c * c; if (d < bd) { bd = d; bk = k; } } sr[size_t(bk)] += p.r; sg[size_t(bk)] += p.g; sb[size_t(bk)] += p.b; cn[size_t(bk)] += 1; }
+        for (int k = 0; k < Kc; ++k) if (cn[size_t(k)] > 0) cen[size_t(k)] = {float(sr[size_t(k)] / cn[size_t(k)]), float(sg[size_t(k)] / cn[size_t(k)]), float(sb[size_t(k)] / cn[size_t(k)])};
+    }
+    for (Image& im : fr) {
+        const int W = im.w, H = im.h; std::vector<uint8_t> lab(size_t(W) * H, 255);
+        for (size_t i = 0; i < size_t(W) * H; ++i) {
+            if (im.rgba[i * 4 + 3] < thr) continue;
+            int bk = 0; double bd = 1e30; for (int k = 0; k < Kc; ++k) { const double a = im.rgba[i * 4] - cen[size_t(k)].r, b = im.rgba[i * 4 + 1] - cen[size_t(k)].g, c = im.rgba[i * 4 + 2] - cen[size_t(k)].b, d = a * a + b * b + c * c; if (d < bd) { bd = d; bk = k; } }
+            lab[i] = uint8_t(bk);
+        }
+        std::vector<uint8_t> out = lab;                                                // moda 3x3: un pixel aislado toma la etiqueta mayoritaria de su entorno
+        for (int y = 1; y + 1 < H; ++y) for (int x = 1; x + 1 < W; ++x) {
+            const size_t i = size_t(y) * W + size_t(x); if (lab[i] == 255) continue;
+            int cnt[64] = {0}; int best = lab[i], bc = 0;
+            for (int dy = -1; dy <= 1; ++dy) for (int dx = -1; dx <= 1; ++dx) { const uint8_t l = lab[size_t(y + dy) * W + size_t(x + dx)]; if (l < 64) { if (++cnt[l] > bc) { bc = cnt[l]; best = l; } } }
+            if (cnt[lab[i]] <= 2 && bc >= 5) out[i] = uint8_t(best);
+        }
+        for (size_t i = 0; i < size_t(W) * H; ++i) if (out[i] != 255) { const C3& c = cen[out[i]]; im.rgba[i * 4] = uint8_t(c.r + 0.5f); im.rgba[i * 4 + 1] = uint8_t(c.g + 0.5f); im.rgba[i * 4 + 2] = uint8_t(c.b + 0.5f); }
+    }
+}
 // Filtro bilateral (media ponderada por cercania espacial y de COLOR): promedia las parejas de colores de un patron de dither y casi no mezcla un contorno oscuro con su relleno.
 inline Image bilateralN(const Image& s0, int thr, int rad, double sigR, double sigS, int iters) {
     static thread_local std::vector<float> lut; static thread_local double lastSig = -1;
@@ -629,6 +671,7 @@ inline LayeredAnim buildLayered(const GifData& g, const GifPlan& plan, const Opt
         fr[size_t(i)] = lo.denoise ? (lo.denoiseMode == 1 ? lay::applyDenoise(im, thr, dcfg) : lay::median3(im, thr)) : im;
         orig[size_t(i)] = std::move(im);
     });
+    if (lo.posterize > 1) lay::posterizeFrames(fr, thr, lo.posterize, base.seed);
     std::vector<Image> sm; sm.resize(size_t(N));
     lay::parallelFor(N, threads, [&](int i) { sm[size_t(i)] = lay::blur3(fr[size_t(i)], thr); });
     report(prog, 0.04f);

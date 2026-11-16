@@ -8,7 +8,7 @@
 	},
 	"id": "patasma.gif_importer",
 	"name": "GIF Importer",
-	"version": "v0.5.8-beta",
+	"version": "v0.5.10-beta",
 	"developer": "Patasma",
 	"description": "Importa GIFs animados al editor usando Alpha triggers + Spawn triggers en bucle infinito. Eliges objetos por frame y metodo de imagen (17 metodos + 18 por capas + 19 arbol de deltas + 20-29 capas LSA). BETA.",
 	"resources": {
@@ -110,6 +110,29 @@
 				"Ultra"
 			],
 			"description": "Cuanto tiempo se dedica a buscar la mejor posicion de cada objeto en los metodos 18 a 29. <cy>Rapido</c>: calcula ~1,2x-1,3x mas rapido con ~0,1-0,3 dB menos. <cy>Normal</c>: el equilibrio de siempre. <cy>Alto</c>, <cy>Maximo</c>, <cy>Extremo</c> y <cy>Ultra</c>: cada nivel busca mas (medido en un GIF real a 1000 objetos/frame: Normal 18,7 dB, Maximo 20,3, Extremo 20,7, Ultra 20,9) y tarda mas (Ultra ~4x Normal). Con muchos frames usa Rapido o Normal."
+		},
+		"layered-mode": {
+			"type": "string",
+			"default": "Mejorado",
+			"name": "Procesamiento de los metodos 18-29",
+			"one-of": [
+				"Mejorado",
+				"Clasico 0.5.5"
+			],
+			"description": "<cy>Mejorado</c>: filtro anti-dithering adaptativo, peso de bordes y duracion de calculo ajustable (en el GIF de prueba da entre +0,6 y +2 dB que el clasico y es mas rapido). <cy>Clasico 0.5.5</c>: vuelve al procesamiento de la 0.5.5 (mediana 3x3, sin peso de bordes, nivel de busqueda segun Calidad de calculo; con Rapido = Normal). Se mantienen los arreglos de la paleta de canales y de los metodos 20, 26 y 27."
+		},
+		"layered-flat": {
+			"type": "string",
+			"default": "Auto",
+			"name": "Colores planos (metodos 18-29)",
+			"one-of": [
+				"Auto",
+				"Pocos (14)",
+				"Medios (24)",
+				"Muchos (40)",
+				"Desactivado"
+			],
+			"description": "Reduce el GIF a una paleta corta de colores planos (estilo dibujo) antes de trazar: con pocos objetos las formas salen de UN color limpio en vez de manchas de tonos casi iguales, y el resultado se ve mas limpio (el PSNR queda igual). <cy>Auto</c>: 14-34 colores con 1200 objetos/frame o menos, desactivado con mas (los degradados ganan detalle). Pensado para dibujos/anime; en fotos usa Desactivado."
 		},
 		"max-raster": {
 			"type": "int",

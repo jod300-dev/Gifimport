@@ -36,6 +36,7 @@ inline Ctx makeCtx(const GifData& g, const GifPlan& plan, const Options& base, c
         c.fr[size_t(i)] = lo.denoise ? (lo.denoiseMode == 1 ? lay::applyDenoise(im, c.thr, dcfg) : lay::median3(im, c.thr)) : im;
         c.orig[size_t(i)] = std::move(im);
     });
+    if (lo.posterize > 1) lay::posterizeFrames(c.fr, c.thr, lo.posterize, base.seed);
     lay::parallelFor(c.N, c.threads, [&](int i) { c.sm[size_t(i)] = lay::blur3(c.fr[size_t(i)], c.thr); });
     for (int i = 0; i < c.N; ++i) {
         size_t oc = lay::opaqueCount(c.orig[size_t(i)], c.thr);
