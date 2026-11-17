@@ -444,9 +444,9 @@ inline void capAnim(LayeredAnim& A, int maxTotal) {
 
 inline LayeredAnim buildAnim(const GifData& g, const GifPlan& plan, const Options& base0, const LayeredOptions& lo0, Progress* prog, int threads) {
     LayeredOptions lo = lo0;
-    if (lo.classic) { lo.denoiseMode = 0; lo.edgeWeight = 0.f; lo.sizeFloor = 0.f; lo.posterize = 0; }
+    if (lo.classic) { lo.denoiseMode = 0; lo.edgeWeight = 0.f; lo.sizeFloor = 0.f; lo.orient = 0.f; lo.posterize = 0; }   // clasico = 0.5.5: sin ninguno de los ajustes nuevos del pintor
     if (lo.posterize < 0) lo.posterize = lo.perFrame <= 1200 ? std::clamp(14 + lo.perFrame / 60, 14, 34) : 0;      // auto: colores planos solo cuando hay pocos objetos (con muchos se pierde detalle de degradado)          // como la 0.5.5: mediana 3x3, sin pesos
-    Options base = base0; base.quality = lo.classic ? std::clamp(std::max(base0.quality, 1), 0, 3) : std::clamp(lo.effort, 0, 5); base.edgeWeight = lo.edgeWeight; base.sizeFloor = lo.sizeFloor;                  // 18-29: la duracion de calculo la fija su propio ajuste
+    Options base = base0; base.quality = lo.classic ? std::clamp(std::max(base0.quality, 1), 0, 3) : std::clamp(lo.effort, 0, 5); base.edgeWeight = lo.edgeWeight; base.sizeFloor = lo.sizeFloor; base.orient = lo.orient;                  // 18-29: la duracion de calculo la fija su propio ajuste
     if (lo.method > 0) return buildLsaAnim(g, plan, base, lo, prog, threads);          // metodos 20-29 (cierre y tope de objetos incluidos)
     LayeredAnim A = lo.tree ? buildTree(g, plan, base, lo, prog, threads) : buildLayered(g, plan, base, lo, prog, threads);
     capAnim(A, lo.maxTotal);

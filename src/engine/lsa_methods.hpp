@@ -347,7 +347,7 @@ inline bool lifetimesRun(const Ctx& c, double tau0, long Bobj, bool refine, std:
     // reserva del 7 % para los rellenos de cobertura; el resto se reparte a densidad uniforme (antes un frame con pocos cambios en el estimador gastaba de mas
     // al principio y los ultimos frames se quedaban sin formas nuevas: 15 dB en el ultimo frame)
     std::vector<Live> alive; fin.clear(); double tau = tau0; long pool = long(double(Bobj) * 0.93), used = 0; double planned = 0;
-    double sumCnt = 0, sumWt = 0; int nSeen = 0;                                      // calibra el area futura estimada con la real
+    double sumCnt = 0, sumWt = 0, fillSum = 0; int nSeen = 0;      // fillSum: rellenos de cobertura gastados (v0.5.9: ahora cuentan en la reserva)                                      // calibra el area futura estimada con la real
     const int rounds = std::clamp(c.quality, 1, 3);
     for (int i = 0; i < N; ++i) {
         if (isCancelled(c.prog)) { cancelled = true; return false; }
@@ -411,7 +411,22 @@ inline bool lifetimesRun(const Ctx& c, double tau0, long Bobj, bool refine, std:
         int b = int(std::max(0.0, double(pool) * double(cnt) / std::max(1e-9, double(cnt) + futArea)));
         b = std::min(b, lay::areaBudget(cnt, 100000));
         // reserva minima para los frames que faltan: ninguno se queda sin formas nuevas aunque el area futura se haya subestimado
-        { const long keepFor = long(std::max(0.0, double(Bobj) * 0.9 / double(N) * 0.65)) * long(N - 1 - i); if (cnt > 0 && pool - keepFor > 0) b = int(std::min<long>(b, pool - keepFor)); else if (cnt > 0) b = std::min<int>(b, 4); }
+        // v0.5.9: la reserva cuenta tambien los rellenos de cobertura (50-300 objetos por frame que antes nadie contaba: el pool se agotaba hacia el frame 17 y los
+        // ultimos frames se quedaban con 4 formas gigantes). Cada frame futuro conserva su minimo (formas + rellenos esperados) y este frame descuenta sus propios rellenos.
+        const double perFrame = double(Bobj) * 0.9 / double(N);
+        const double fillEst = nSeen > 0 ? fillSum / double(nSeen) : 0.25 * perFrame;
+        { const long keepFor = long((perFrame * 0.55 + fillEst) * double(N - 1 - i)); const long avail = pool - keepFor - long(fillEst);
+          if (cnt > 0) b = std::max<int>(int(std::min<long>(b, std::max<long>(avail, 0))), int(std::min<double>(perFrame * 0.45, double(std::max<long>(pool - long(fillEst), 0))))); }
+        // v0.5.9: reparto parejo. Si casi toda la imagen cambia en cada frame (GIF con mucho movimiento) las formas casi no se reciclan y el pool se
+        // agotaba hacia el final: los ultimos frames quedaban con 77-114 formas para ~90 000 px (celdas gigantes, 10-13 dB). Cada frame recibe
+        // lo que queda repartido entre los frames que faltan (descontados los rellenos), ajustado por cuanto hay que repintar (0.6x .. 1.5x).
+        if (cnt > 0) {
+            const double even = std::max(0.0, (double(pool) - fillEst * double(N - i)) / double(N - i));
+            const double scale = nSeen > 0 ? std::clamp(double(cnt) / std::max(1.0, sumCnt / double(nSeen)), 0.6, 1.5) : 1.0;
+            const double hi = even * (i == 0 ? 1.8 : 1.5) * (i == 0 ? 1.0 : scale / 1.0 > 1.0 ? 1.0 : 1.0);
+            b = int(std::clamp(double(b), i == 0 ? 0.0 : even * 0.6 * scale, std::max(hi, 4.0)));
+            if (long(b) > pool) b = int(std::max<long>(pool, 0));
+        }
         if (cnt > 0) b = std::max(b, std::min<int>(4, int(pool)));
         if (i > 0) { sumCnt += double(cnt); sumWt += wt[size_t(i)]; ++nSeen; }
         if (cnt > 0 && b > 0 && pool > 0) {
@@ -420,7 +435,7 @@ inline bool lifetimesRun(const Ctx& c, double tau0, long Bobj, bool refine, std:
             const Image* up = nullptr; if (any && c.opaqueAll) { lay::pushPull(under, valid); up = &under; }
             Result res = fitImage(c, lay::maskedImage(tg, mask), tg, up, b, c.seed + uint32_t(i) * 17u);
             if (refine && !res.shapes.empty()) refineShapes(res.shapes, tg, up, c.thr, rounds, c.seed + uint32_t(i), 20000L + long(res.shapes.size()) * 400L);
-            for (const Shape& s : res.shapes) { Live l; l.s = s; l.birth = i; alive.push_back(l); }
+            for (const Shape& s : res.shapes) { Live l; l.s = s; l.s.z = int16_t(std::min<int>(32000, int(s.z) + 1)); l.birth = i; alive.push_back(l); }   // z+1: el relleno de cobertura (z=0) queda debajo
             pool -= long(res.shapes.size()); used += long(res.shapes.size());
         }
         // garantia de cobertura: si tras todo queda algun pixel opaco sin forma, se rellena con tiras de 1 px (un hueco deja ver el fondo del nivel)
@@ -430,17 +445,30 @@ inline bool lifetimesRun(const Ctx& c, double tau0, long Bobj, bool refine, std:
             const Image cv = renderShapes(sh, W, H); size_t added = 0;
             std::vector<uint8_t> need(np, 0); bool anyNeed = false;
             for (size_t p = 0; p < np; ++p) if (cv.rgba[p * 4 + 3] == 0 && tg.rgba[p * 4 + 3] >= c.thr) { need[p] = 1; anyNeed = true; }
-            // cubrimiento voraz con rectangulos: crece a la derecha y luego hacia abajo mientras todo siga sin cubrir (muchos menos objetos que una tira por fila)
+            // v0.5.9: cubrimiento voraz con rectangulos que pueden CRECER a traves de pixeles ya cubiertos por formas NACIDAS EN ESTE FRAME: el relleno tiene z=0 y
+            // queda debajo de ellas, asi que no se ve y no tapa nada anterior. Antes solo crecia por pixeles sin cubrir: 50-300 rellenos por frame (los que mas
+            // presupuesto gastaban, mas que el propio ajuste). Color = media del objetivo en los pixeles sin cubrir del rectangulo.
+            std::vector<uint8_t> okGrow = need; std::vector<std::pair<long, Shape>> cand;
+            if (anyNeed) {
+                std::vector<Shape> nw; for (auto& l : alive) if (l.birth == i) nw.push_back(l.s);
+                if (!nw.empty()) { const Image cn = renderShapes(nw, W, H); for (size_t p = 0; p < np; ++p) if (cn.rgba[p * 4 + 3] > 0) okGrow[p] = 1; }
+            }
             for (int y = 0; anyNeed && y < H; ++y) for (int x = 0; x < W; ++x) {
                 if (!need[size_t(y) * W + size_t(x)]) continue;
-                int x1 = x; while (x1 + 1 < W && need[size_t(y) * W + size_t(x1) + 1]) ++x1;
-                int y1 = y; for (;;) { if (y1 + 1 >= H) break; bool ok = true; for (int xx = x; xx <= x1; ++xx) if (!need[size_t(y1 + 1) * W + size_t(xx)]) { ok = false; break; } if (!ok) break; ++y1; }
-                for (int yy = y; yy <= y1; ++yy) for (int xx = x; xx <= x1; ++xx) need[size_t(yy) * W + size_t(xx)] = 0;
-                const uint8_t* col = &tg.rgba[(size_t((y + y1) / 2) * W + size_t((x + x1) / 2)) * 4];
-                Shape f; f.cx = 0.5f * float(x + x1 + 1); f.cy = 0.5f * float(y + y1 + 1); f.w = float(x1 - x + 1); f.h = float(y1 - y + 1); f.rot = 0; f.r = col[0]; f.g = col[1]; f.b = col[2]; f.z = 0;
-                Live l; l.s = f; l.birth = i; alive.push_back(l); ++added; pool -= 1; used += 1; x = x1;
+                int x1 = x; while (x1 + 1 < W && okGrow[size_t(y) * W + size_t(x1) + 1]) ++x1;
+                int y1 = y; for (;;) { if (y1 + 1 >= H) break; bool ok = true; for (int xx = x; xx <= x1; ++xx) if (!okGrow[size_t(y1 + 1) * W + size_t(xx)]) { ok = false; break; } if (!ok) break; ++y1; }
+                double sr = 0, sg = 0, sb = 0; long sn = 0;
+                for (int yy = y; yy <= y1; ++yy) for (int xx = x; xx <= x1; ++xx) { const size_t q = size_t(yy) * W + size_t(xx); if (need[q]) { const uint8_t* t = &tg.rgba[q * 4]; sr += t[0]; sg += t[1]; sb += t[2]; ++sn; need[q] = 0; } }
+                if (sn == 0) continue;
+                Shape f; f.cx = 0.5f * float(x + x1 + 1); f.cy = 0.5f * float(y + y1 + 1); f.w = float(x1 - x + 1); f.h = float(y1 - y + 1); f.rot = 0;
+                f.r = uint8_t(sr / double(sn) + 0.5); f.g = uint8_t(sg / double(sn) + 0.5); f.b = uint8_t(sb / double(sn) + 0.5); f.z = 0;
+                cand.push_back({sn, f});
             }
-            (void)added;
+            // solo los rellenos que cubren area de verdad; el polvo de huecos de 1-2 px no compensa un objeto cada uno (v0.5.9)
+            std::sort(cand.begin(), cand.end(), [](const std::pair<long, Shape>& a, const std::pair<long, Shape>& b) { return a.first > b.first; });
+            const size_t kMax = size_t(std::max(10.0, 0.12 * perFrame));
+            for (size_t k = 0; k < cand.size() && k < kMax; ++k) { if (cand[k].first < 6) break; Live l; l.s = cand[k].second; l.birth = i; alive.push_back(l); ++added; pool -= 1; used += 1; }
+            fillSum += double(added);
         }
         planned += double(Bobj) * wt[size_t(i)] / totW;                               // ritmo: si se gasta mas de lo previsto, tolerancia mas laxa (mas vida)
         tau = std::clamp(tau0 * std::exp(8.0 * (double(used) - planned) / std::max(1.0, double(Bobj))), 0.02, 0.6);

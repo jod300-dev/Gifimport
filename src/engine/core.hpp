@@ -64,6 +64,7 @@ struct Options {
     int alphaThreshold = 128;            // alfa >= umbral => píxel opaco
     int quality = 2;                     // 0 rápido, 1 normal, 2 alto, 3 máximo
     float sizeFloor = 0.f;               // 0 = desactivado. >0: tamano final de las formas del pintor = sizeFloor*sqrt(area/objetos) (sin confeti con pocos objetos)
+    float orient = 0.f;                  // v0.5.9: prob. (0..1) de que una forma del pintor nazca alargada a lo largo del contorno (0 = como antes)
     float edgeWeight = 0.f;              // 0 = desactivado. >0: los pixeles de borde pesan hasta 1+edgeWeight veces en el pintor (contornos mas nitidos)
     float hybridFraction = -1.f;         // fracción del presupuesto para la base BSP del híbrido (<0 = automática)
     uint32_t seed = 1337;

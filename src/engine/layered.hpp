@@ -51,9 +51,10 @@ struct LayeredOptions {
     int painter = 1;          // 1 = tras el BSP, rectangulos rotados guiados por el error (solo GIF sin transparencia)
     float reuse = 0.005f;     // un frame reutiliza el parche de otro (mismo rest) si difieren en menos de esta fraccion del lienzo (0 = no reutilizar)
     float stillBsp = 0.55f;   // idem para el fondo (el fondo es grande y regular: mas BSP)
-    float sizeFloor = 0.f;    // v0.5.7: tamano final del pintor segun el presupuesto (0 = igual que antes)
+    float sizeFloor = 0.7f;   // v0.5.9: tamano final del pintor segun el presupuesto (0 = sin limite: confeti). Medido en 3 presupuestos: 0.7 es lo mejor
     int posterize = -1;       // v0.5.9: -1 = auto (presupuestos <= 1200 obj/frame: 14-34 colores planos), 0 = no, K>1 = reduce todos los frames a K colores planos antes de trazar (aspecto limpio con pocos objetos)
-    float edgeWeight = 3.f;   // v0.5.7: peso extra de los pixeles de borde en el pintor (0 = igual que antes)
+    float edgeWeight = 0.f;   // v0.5.9: peso extra de los bordes en el pintor. Con 3 (v0.5.7/0.5.8) EMPEORABA (SSIM -8%, -1 dB): vuelve a 0 como en la v0.5.5
+    float orient = 0.7f;      // v0.5.9: prob. de que una forma nueva nazca alargada a lo largo del contorno (0 = como la v0.5.8)
     float bspFrac = 0.15f;    // fraccion del presupuesto de cada capa que usa la base BSP (el resto: rectangulos rotados)
     bool tree = false;        // metodo 19: arbol de deltas (cada frame se predice del frame mas parecido, no de un rest fijo)
     int method = 0;           // 0 = metodos 18/19; 1..10 = metodos 20..29 (capas LSA, ver lsa_methods.hpp)
@@ -562,6 +563,7 @@ inline Result traceHybrid(const Image& layerImg, const Image& target, const Imag
     Geo geo(target, seed);
     if (base.edgeWeight > 0.f) geo.setWeights(edgeWeights(target, base.edgeWeight));
     if (base.sizeFloor > 0.f) geo.setSizeFloor(base.sizeFloor);
+    geo.setOrient(base.orient);
     auto setCanvas = [&](const std::vector<Shape>& sh) {
         Image c;
         if (baseCanvas) c = *baseCanvas;

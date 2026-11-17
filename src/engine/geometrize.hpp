@@ -24,6 +24,7 @@ public:
         tx = (W + kTile - 1) / kTile; ty = (H + kTile - 1) / kTile;
         tileErr.assign(size_t(tx) * ty, 0.0);
         L = float(std::max(W, H));
+        buildOrientation(target);
         // sumas por fila (prefijos): cada fila de un candidato cuesta O(1) en vez de O(ancho). Los valores son enteros exactos, asi que
         // los resultados son IDENTICOS a sumar pixel a pixel (solo cambia la velocidad).
         pre.assign(size_t(W + 1) * H, Acc{});
@@ -38,6 +39,8 @@ public:
     // Pesos por pixel (1..8): el error de un pixel de peso w cuenta w veces y el color de una forma es la media PONDERADA. Con todos a 1 es identico a no usarlos.
     // Tamano final de las formas segun el presupuesto: con pocos objetos el pintor ya no baja a formas de 2-3 px (confeti), termina en formas de ~k*sqrt(area/objetos)
     void setSizeFloor(float k) { sizeK = k; }
+    // v0.5.9: probabilidad de que una forma nueva nazca ALINEADA con el contorno local (alargada a lo largo de la linea). 0 = como antes.
+    void setOrient(float p) { orientP = p; }
     void setWeights(const std::vector<uint8_t>& w) {
         for (int i = 0; i < W * H; ++i) { const int k = std::clamp<int>(w[size_t(i)], 1, 8); px[i].w = k; px[i].r = px[i].r0 * k; px[i].g = px[i].g0 * k; px[i].b = px[i].b0 * k; px[i].tt = (px[i].r0 * px[i].r0 + px[i].g0 * px[i].g0 + px[i].b0 * px[i].b0) * k; }
         rebuildStatic();
@@ -120,7 +123,8 @@ private:
     struct Acc { int32_t r = 0, g = 0, b = 0, w = 0; int64_t tt = 0, e = 0; };   // suma acumulada de una fila hasta x (exclusive)
     std::vector<Acc> pre;                                                // (W + 1) por fila
     struct Ev { double gain = -1e300, mr = 0, mg = 0, mb = 0; };
-    int W, H; float L; float sizeK = 0.f;
+    int W, H; float L; float sizeK = 0.f; float orientP = 0.f;
+    std::vector<float> tileAng, tileCoh;       // por tile: angulo de la tangente del contorno (grados, 0..180) y coherencia 0..1
     Rng rng;
     std::vector<Px> px;
     std::vector<uint8_t> canvas;
@@ -129,6 +133,31 @@ private:
     bool hasMask = false;
     std::vector<uint8_t> mask;                 // 1 = pixel opaco
     std::vector<int32_t> invPrefix;            // por fila: cuantos pixeles transparentes hay antes de x
+
+    // Tensor de estructura por tile (gradiente de la luminancia): da la direccion del contorno y lo fiable que es (0 = zona plana / sin direccion).
+    void buildOrientation(const Image& t) {
+        tileAng.assign(size_t(tx) * ty, 0.f); tileCoh.assign(size_t(tx) * ty, 0.f);
+        std::vector<float> lum(size_t(W) * H);
+        for (int i = 0; i < W * H; ++i) lum[size_t(i)] = 0.299f * t.rgba[size_t(i) * 4] + 0.587f * t.rgba[size_t(i) * 4 + 1] + 0.114f * t.rgba[size_t(i) * 4 + 2];
+        auto L_ = [&](int x, int y) { return lum[size_t(std::clamp(y, 0, H - 1)) * W + size_t(std::clamp(x, 0, W - 1))]; };
+        for (int tyy = 0; tyy < ty; ++tyy) for (int txx = 0; txx < tx; ++txx) {
+            double jxx = 0, jyy = 0, jxy = 0, mag = 0;
+            // ventana de 3x3 tiles: mas estable que un tile solo
+            for (int y = std::max(0, (tyy - 1) * kTile); y < std::min(H, (tyy + 2) * kTile); ++y)
+                for (int x = std::max(0, (txx - 1) * kTile); x < std::min(W, (txx + 2) * kTile); ++x) {
+                    const double gx = (L_(x + 1, y - 1) + 2 * L_(x + 1, y) + L_(x + 1, y + 1)) - (L_(x - 1, y - 1) + 2 * L_(x - 1, y) + L_(x - 1, y + 1));
+                    const double gy = (L_(x - 1, y + 1) + 2 * L_(x, y + 1) + L_(x + 1, y + 1)) - (L_(x - 1, y - 1) + 2 * L_(x, y - 1) + L_(x + 1, y - 1));
+                    jxx += gx * gx; jyy += gy * gy; jxy += gx * gy; mag += std::sqrt(gx * gx + gy * gy);
+                }
+            const double tr = jxx + jyy, df = jxx - jyy, rt = std::sqrt(df * df + 4 * jxy * jxy);
+            const size_t k = size_t(tyy) * tx + txx;
+            tileCoh[k] = tr > 1e-6 ? float(rt / tr) : 0.f;
+            if (mag < 60.0) tileCoh[k] = 0.f;                                  // sin contorno marcado en esta zona
+            double a = 0.5 * std::atan2(2 * jxy, df) * 180.0 / 3.14159265358979323846;   // direccion del gradiente
+            a += 90.0; while (a < 0) a += 180.0; while (a >= 180.0) a -= 180.0;         // tangente
+            tileAng[k] = float(a);
+        }
+    }
 
     void recomputeAll() {
         std::fill(tileErr.begin(), tileErr.end(), 0.0);
@@ -238,6 +267,15 @@ private:
         c.w = std::exp(rng.range(lmin, lmax)); c.h = std::exp(rng.range(lmin, lmax));
         c.rot = rng.range(0.f, 180.f);
         if (rng.f() < 0.2f) c.rot = 0.f;                                  // algunas alineadas a ejes: pueden cubrir hasta el borde
+        if (orientP > 0.f) {                                              // v0.5.9: sobre un contorno claro, forma alargada a lo largo de la linea
+            const size_t k = size_t(lo) ;
+            const float coh = tileCoh[k];
+            if (coh > 0.35f && rng.f() < orientP) {
+                c.rot = tileAng[k] + rng.gauss() * 6.f;
+                const float len = std::exp(rng.range(std::log(std::max(minS, maxS * 0.25f)), lmax)), thick = std::exp(rng.range(lmin, std::log(std::max(minS * 1.01f, maxS * 0.3f))));
+                c.w = len; c.h = std::min(thick, len);
+            }
+        }
         clipAxis(c);
         return c;
     }
@@ -328,6 +366,7 @@ inline std::vector<Shape> geometrizeShapes(const Image& src, const Options& o, d
 
     std::vector<Shape> shapes;
     Geo geo(target, o.seed);
+    geo.setOrient(o.orient);
     const bool alphaImg = hasTransparency(ras, o.alphaThreshold);
     if (alphaImg) {                                              // los rectangulos solo dentro de la zona opaca
         std::vector<uint8_t> valid(size_t(W) * H, 0);
