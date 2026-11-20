@@ -21,10 +21,10 @@ static int triggerOverlaps(const std::string& s) {
     for (auto& kv : parse(s)) {
         if (!kv.count(1)) continue;
         int id = std::stoi(kv.at(1));
-        if (id != 1007 && id != 1268) continue;
+        if (id != 1007 && id != 1049 && id != 1268) continue;       // 1007 Alpha / 1049 Toggle = mostrar-ocultar frames
         double x = std::stod(kv.at(2)), y = std::stod(kv.at(3));
         if (!kv.count(62)) { start.push_back({x, y}); continue; }
-        if (id == 1007) { if (fa) { yA = y; fa = false; } if (x <= lastA || std::abs(y - yA) > 0.01) ++bad; lastA = x; }
+        if (id == 1007 || id == 1049) { if (fa) { yA = y; fa = false; } if (x <= lastA || std::abs(y - yA) > 0.01) ++bad; lastA = x; }
         else            { if (fs) { yS = y; fs = false; } if (x <= lastS || std::abs(y - yS) > 0.01) ++bad; lastS = x; }
     }
     if (!fa && !fs && !(yA > yS)) ++bad;                          // Alpha ARRIBA, Spawn DEBAJO
@@ -68,7 +68,7 @@ static bool triggersBeforeObjects(const std::string& s) {
         if (!kv.count(1)) continue;
         int id = std::stoi(kv.at(1));
         if (id == 3092) seenObj = true;
-        else if (seenObj && (id == 1007 || id == 1268 || id == 899)) return false;
+        else if (seenObj && (id == 1007 || id == 1049 || id == 1268 || id == 899)) return false;
     }
     return true;
 }

@@ -100,6 +100,7 @@ struct ChainStats {
     int zMin = 1 << 30, zMax = -(1 << 30);
     double xMin = 1e18, xMax = -1e18, yMin = 1e18, yMax = -1e18;
     size_t zeroZ = 0, hugeScale = 0, tinyScale = 0, nonFinite = 0;
+    size_t alphas = 0, toggles = 0;                       // triggers de mostrar/ocultar: Alpha (1007) / Toggle (1049)
     std::map<int, std::vector<std::string>> spawnsOf;     // grupo propio -> "->destino@retardo"
     std::map<int, std::pair<std::vector<int>, int>> alphaOf;   // grupo propio -> (grupos que muestra, n que oculta)
     std::vector<std::string> warnings;
@@ -148,9 +149,13 @@ inline ChainStats scanChain(const std::string& chain, std::string& objTsv, std::
                     if (id == 899 && kv.count(23)) S.chanColored.insert(int(num(kv[23])));
                     const int own = groups.empty() ? 0 : groups[0];
                     if (id == 1268) { char b2[64]; std::snprintf(b2, sizeof b2, "%d@%s", tgt, kv.count(63) ? kv[63].c_str() : "0"); S.spawnsOf[own].push_back(b2); }
-                    if (id == 1007) { auto& a = S.alphaOf[own]; if (kv.count(35) && num(kv[35]) >= 0.5) a.first.push_back(tgt); else ++a.second; }
+                    if (id == 1007 || id == 1049) {                                   // mostrar/ocultar: Alpha (clave 35 = opacidad) o Toggle (clave 56 = activar grupo)
+                        auto& a = S.alphaOf[own]; const int vk = id == 1049 ? 56 : 35;
+                        if (id == 1049) ++S.toggles; else ++S.alphas;
+                        if (kv.count(vk) && num(kv[vk]) >= 0.5) a.first.push_back(tgt); else ++a.second;
+                    }
                     std::snprintf(line, sizeof line, "%zu\t%s\t%d\t%.3f\t%.3f\t%d\t%s\t%d\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", n, tn, id, x, y, tgt, gs.c_str(), spawnTrig ? 1 : 0, kv.count(87) ? int(num(kv[87])) : 0,
-                                  kv.count(35) ? kv[35].c_str() : "", kv.count(10) ? kv[10].c_str() : "", kv.count(63) ? kv[63].c_str() : "", kv.count(7) ? kv[7].c_str() : "", kv.count(8) ? kv[8].c_str() : "", kv.count(9) ? kv[9].c_str() : "", kv.count(23) ? kv[23].c_str() : "");
+                                  kv.count(id == 1049 ? 56 : 35) ? kv[id == 1049 ? 56 : 35].c_str() : "", kv.count(10) ? kv[10].c_str() : "", kv.count(63) ? kv[63].c_str() : "", kv.count(7) ? kv[7].c_str() : "", kv.count(8) ? kv[8].c_str() : "", kv.count(9) ? kv[9].c_str() : "", kv.count(23) ? kv[23].c_str() : "");
                     trgTsv += line;
                 } else {
                     ++S.blocks;
@@ -222,6 +227,9 @@ inline Output build(const Input& in) {
     ChainStats S = scanChain(*in.chain, O.objetos, O.triggers);
     R << "## Cadena de GD\nbytes: " << in.chain->size() << "  objetos totales: " << S.objects << "  bloques: " << S.blocks << "  triggers: " << S.triggers << "  (limite del editor 200000; sitio libre antes de colocar: " << in.editorRoom << ")\n";
     R << "por id: "; for (auto& kv : S.byId) R << kv.first << "=" << kv.second << " "; R << "\n";
+    R << "triggers de mostrar/ocultar frames: Alpha (1007) = " << S.alphas << "  Toggle (1049) = " << S.toggles
+      << (S.toggles > 0 && S.alphas == 0 ? "   [modo Toggle: los frames ocultos se desactivan en vez de ponerse a opacidad 0]" : "") << "\n";
+    if (S.toggles > 0 && S.alphas > 0) S.warnings.push_back("la cadena mezcla Alpha y Toggle triggers (deberia usar solo uno de los dos)");
     if (S.blocks) R << "caja: x " << std::setprecision(1) << S.xMin << " .. " << S.xMax << "   y " << S.yMin << " .. " << S.yMax << "   z-order " << S.zMin << " .. " << S.zMax << "\n";
     R << "grupos con objetos: " << S.objsInGroup.size() << "  grupos con triggers: " << S.trigGroups.size() << "  canales de color usados por bloques: " << S.chanUsed.size() << "  fijados por Color triggers: " << S.chanColored.size() << "\n\n";
     R << "## COMPROBACIONES automaticas\n";
@@ -257,7 +265,7 @@ inline Output build(const Input& in) {
     int shown = 0;
     for (auto& kv : S.spawnsOf) { if (shown++ >= 120) { R << "...\n"; break; } R << "grupo " << kv.first << " lanza: "; for (size_t i = 0; i < kv.second.size() && i < 40; ++i) R << kv.second[i] << ' '; if (kv.second.size() > 40) R << "... (" << kv.second.size() << ")"; R << "\n"; }
     shown = 0;
-    for (auto& kv : S.alphaOf) { if (shown++ >= 120) { R << "...\n"; break; } R << "grupo " << kv.first << " alpha: muestra "; for (size_t i = 0; i < kv.second.first.size() && i < 20; ++i) R << kv.second.first[i] << ' '; R << " oculta " << kv.second.second << " grupos\n"; }
+    for (auto& kv : S.alphaOf) { if (shown++ >= 120) { R << "...\n"; break; } R << "grupo " << kv.first << " alpha/toggle: muestra "; for (size_t i = 0; i < kv.second.first.size() && i < 20; ++i) R << kv.second.first[i] << ' '; R << " oculta " << kv.second.second << " grupos\n"; }
     R << "\n";
 
     // ---- comparacion con el GIF ----

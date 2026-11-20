@@ -1,6 +1,6 @@
 # GIF Importer (beta)
 
-Importa un **GIF animado** al editor de Geometry Dash. Cada frame se convierte en objetos (con el metodo que elijas) y se anima con **Alpha triggers + Spawn triggers**, en **bucle infinito**.
+Importa un **GIF animado** al editor de Geometry Dash. Cada frame se convierte en objetos (con el metodo que elijas) y se anima con **Alpha triggers (o Toggle triggers, con menos lag) + Spawn triggers**, en **bucle infinito**.
 
 - Eliges **cuantos objetos usar por frame** y el **metodo de imagen** (17 metodos: cuadricula, quadtree, BSP, piramide, regiones, franjas, rectangulos rotados, hibrido y 9 estilos de tinta).
 - Usa los **retardos reales del GIF** (con velocidad ajustable).

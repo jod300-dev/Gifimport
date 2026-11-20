@@ -11,8 +11,11 @@
 #include <filesystem>
 #include <fstream>
 #include "diag.hpp"
+#include "UiCollect.hpp"      // volcado de la interfaz (ajuste "ui-dump")
+#include <cctype>
 
 namespace {
+    constexpr char const* kModVersion = "v0.5.11-beta";
     constexpr float kPopupW = 430.f, kPopupH = 290.f;
     constexpr float kPrevSize = 140.f;
     constexpr int kMethodCount = int(gdx::Method::Ascii);          // metodos 1-17 (el ASCII no sirve para animar)
@@ -37,6 +40,30 @@ namespace {
         if (q == "Extremo") return 4;
         if (q == "Ultra") return 5;
         return 1;
+    }
+    std::string platformString() {
+        std::string r = "plataforma: ";
+#ifdef GEODE_PLATFORM_NAME
+        r += GEODE_PLATFORM_NAME;
+#else
+        r += "?";
+#endif
+#ifdef GEODE_GD_VERSION_STRING
+        r += std::string("   GD ") + GEODE_GD_VERSION_STRING;
+#endif
+        return r;
+    }
+    void nowStrings(std::string& stamp, std::string& when) {
+        const std::time_t now = std::time(nullptr); std::tm lt{};
+#ifdef _WIN32
+        localtime_s(&lt, &now);
+#else
+        localtime_r(&now, &lt);
+#endif
+        char a[32], b[48];
+        std::strftime(a, sizeof a, "%Y%m%d_%H%M%S", &lt);
+        std::strftime(b, sizeof b, "%Y-%m-%d %H:%M:%S", &lt);
+        stamp = a; when = b;
     }
     // sliders 0..1 <-> valor
     float pfToSlider(int v) { return std::clamp(float(std::log(double(v) / kMinPF) / std::log(double(kMaxPF) / kMinPF)), 0.f, 1.f); }
@@ -262,6 +289,11 @@ bool GifPopup::init(EditorUI* editor) {
     putBtn(infoBtn, 414.f, 258.f);
     auto setBtn = CCMenuItemSpriteExtra::create(ButtonSprite::create("Ajustes", "bigFont.fnt", "GJ_button_04.png", 0.4f), this, menu_selector(GifPopup::onSettings));
     putBtn(setBtn, 40.f, 270.f);
+    m_dumpBtn = CCMenuItemSpriteExtra::create(ButtonSprite::create("UI", "bigFont.fnt", "GJ_button_05.png", 0.4f), this, menu_selector(GifPopup::onDumpUi));
+    m_dumpBtn->setID("ui-dump-button"_spr);
+    putBtn(m_dumpBtn, 104.f, 270.f);
+    this->refreshDumpButton();                                            // solo se ve con el ajuste "Guardar volcado de la interfaz"
+    this->scheduleAutoDump("abrir", 1.5f);                                // (solo con "ui-dump-auto") espera a que termine la animacion de apertura
 
     this->schedule(schedule_selector(GifPopup::tick), 0.1f);
     this->refreshLabels();
@@ -314,6 +346,7 @@ void GifPopup::setStatus(std::string const& a, std::string const& b, std::string
     m_statB->setString(b.c_str());
     m_statB->limitLabelWidth(150.f, 0.75f, 0.4f);
     m_noteLabel->setString(note.c_str());
+    this->scheduleAutoDump("estado", 1.0f);
 }
 
 void GifPopup::stepMethod(int dir) {
@@ -573,6 +606,7 @@ void GifPopup::recompute(float) {
 }
 
 void GifPopup::tick(float) {
+    this->refreshDumpButton();
     // --- conversion completa en curso
     if (m_build) {
         if (m_build->done.load(std::memory_order_acquire)) {
@@ -809,16 +843,7 @@ void GifPopup::saveDiagnostics(std::shared_ptr<BuildJob> const& job, gdx::GifExp
         } else {
             frames = job->results;
         }
-        std::ostringstream st;
-        st << "[ajustes del mod]\n";
-        for (const char* k : {"max-total-objects", "first-group", "threads", "max-raster", "alpha-threshold", "color-channel", "black-channel", "white-channel", "layered-tolerance", "layered-palette-size"})
-            st << k << " = " << mod->getSettingValue<int>(k) << "\n";
-        for (const char* k : {"speed", "min-delay", "bleed", "layered-reuse"}) st << k << " = " << mod->getSettingValue<double>(k) << "\n";
-        for (const char* k : {"triggers-at-start", "flip-rotation", "select-after", "invert-ink", "layered-rotated", "layered-denoise", "save-report"})
-            st << k << " = " << (mod->getSettingValue<bool>(k) ? "true" : "false") << "\n";
-        for (const char* k : {"place-mode", "quality", "compute-effort", "layered-mode", "layered-flat"}) st << k << " = " << mod->getSettingValue<std::string>(k) << "\n";
-        st << "[ventana]\nindice de metodo = " << m_method << " (metodo " << (m_method + 1) << ")\nobjetos por frame = " << m_perFrame << "\nlado largo (u) = " << m_sizeU
-           << "\nframes maximos = " << m_maxFrames << "\ngris = " << m_gray << "\ncanales = " << m_chan << "\ntamano de paleta = " << paletteSize() << "\n";
+        const std::string settingsStr = this->settingsText();
 
         const std::time_t now = std::time(nullptr); std::tm lt{};
 #ifdef _WIN32
@@ -831,8 +856,8 @@ void GifPopup::saveDiagnostics(std::shared_ptr<BuildJob> const& job, gdx::GifExp
 
         gdx::diag::Input in;
         in.chain = &chain; in.gif = job->gif.get(); in.plan = &job->plan; in.frames = &frames; in.layered = job->layered.get();
-        in.settingsText = st.str(); in.methodName = m_methodLabel ? std::string(m_methodLabel->getString()) : std::string("?");
-        in.modVersion = "v0.5.10-beta"; in.when = when;
+        in.settingsText = settingsStr; in.methodName = m_methodLabel ? std::string(m_methodLabel->getString()) : std::string("?");
+        in.modVersion = kModVersion; in.when = when;
         in.platformText = std::string("plataforma: ")
 #ifdef GEODE_PLATFORM_NAME
             + GEODE_PLATFORM_NAME
@@ -874,6 +899,144 @@ void GifPopup::saveDiagnostics(std::shared_ptr<BuildJob> const& job, gdx::GifExp
     }
 }
 
+// ===================================================================================================================
+//  Diagnostico de la interfaz. Ajustes: "ui-dump" (muestra el boton UI), "ui-dump-auto" (volcado automatico al abrir y cuando
+//  cambia el estado) y "ui-dump-scene" (ademas, arbol de toda la escena en un segundo archivo).
+//  Se guarda en <carpeta del mod>/ui-dumps/ui_<fecha>_<motivo>.txt: TODO lo de la ventana (clase, id, posicion, ancla, tamano, escala,
+//  giro, z, visibilidad, color, opacidad, texto, fuente, estado de botones/checks/sliders, caja en unidades de la ventana), los ajustes,
+//  el estado interno y comprobaciones automaticas (textos solapados, cosas fuera de la ventana...). Con el boton UI tambien se copia al portapapeles.
+// ===================================================================================================================
+
+std::string GifPopup::settingsText() const {
+    auto* mod = Mod::get();
+    std::ostringstream st;
+    st << "[ajustes del mod]\n";
+    for (const char* k : {"max-total-objects", "first-group", "threads", "max-raster", "alpha-threshold", "color-channel", "black-channel", "white-channel", "layered-tolerance", "layered-palette-size"})
+        st << k << " = " << mod->getSettingValue<int>(k) << "\n";
+    for (const char* k : {"speed", "min-delay", "bleed", "layered-reuse"}) st << k << " = " << mod->getSettingValue<double>(k) << "\n";
+    for (const char* k : {"triggers-at-start", "flip-rotation", "select-after", "invert-ink", "layered-rotated", "layered-denoise", "use-toggles", "save-report", "ui-dump", "ui-dump-auto", "ui-dump-scene"})
+        st << k << " = " << (mod->getSettingValue<bool>(k) ? "true" : "false") << "\n";
+    for (const char* k : {"place-mode", "quality", "compute-effort", "layered-mode", "layered-flat"}) st << k << " = " << mod->getSettingValue<std::string>(k) << "\n";
+    st << "[ventana]\nindice de metodo = " << m_method << " (metodo " << (m_method + 1) << ")\nobjetos por frame = " << m_perFrame << "\nlado largo (u) = " << m_sizeU
+       << "\nframes maximos = " << m_maxFrames << "\ngris = " << m_gray << "\ncanales = " << m_chan << "\ntamano de paleta = " << paletteSize() << "\n";
+    return st.str();
+}
+
+std::string GifPopup::uiStateText() const {
+    auto S = [](CCLabelBMFont* l) { const char* t = l ? l->getString() : nullptr; return t ? std::string(t) : std::string("(null)"); };
+    std::ostringstream o;
+    o << "tamano de la ventana (constantes) = " << kPopupW << " x " << kPopupH << "   vista previa = " << kPrevSize << " x " << kPrevSize << "\n";
+    o << "metodo (indice) = " << m_method << "   etiqueta = \"" << S(m_methodLabel) << "\"\n";
+    o << "descripcion = \"" << S(m_descLabel) << "\"\n";
+    o << "estado A = \"" << S(m_statA) << "\"   estado B = \"" << S(m_statB) << "\"   nota = \"" << S(m_noteLabel) << "\"\n";
+    o << "valor objetos por frame = \"" << S(m_perFrameValue) << "\"   valor lado largo = \"" << S(m_sizeValue) << "\"   valor frames = \"" << S(m_framesValue) << "\"\n";
+    o << "objetos por frame = " << m_perFrame << "   lado largo = " << m_sizeU << "   frames maximos = " << m_maxFrames << "   gris = " << m_gray << "   canales = " << m_chan << "\n";
+    o << "slider objetos/frame: " << gdx::uic::sliderExtra(m_perFrameSlider) << "  slider lado: " << gdx::uic::sliderExtra(m_sizeSlider) << "  slider frames: " << gdx::uic::sliderExtra(m_framesSlider) << "\n";
+    if (m_gif) o << "GIF cargado: " << m_gif->w << "x" << m_gif->h << " px, " << m_gif->frames.size() << " frames\n"; else o << "GIF cargado: no\n";
+    o << "vista previa: resultado = " << (m_hasResult ? "si" : "no") << "   raster " << m_result.rasterW << "x" << m_result.rasterH << "   aspecto " << m_result.aspect
+      << "   formas " << m_result.shapes.size() << "   sprite = " << (m_preview ? "si" : "no") << "\n";
+    o << "calculo de vista previa en curso = " << (m_job ? "si" : "no") << "   colocacion en curso = " << (m_build ? "si" : "no") << "\n";
+    return o.str();
+}
+
+void GifPopup::refreshDumpButton() {
+    if (!m_dumpBtn) return;
+    const bool on = Mod::get()->getSettingValue<bool>("ui-dump");
+    if (m_dumpBtn->isVisible() != on) { m_dumpBtn->setVisible(on); m_dumpBtn->setEnabled(on); }
+}
+
+void GifPopup::scheduleAutoDump(char const* reason, float delay) {
+    auto* mod = Mod::get();
+    if (!mod->getSettingValue<bool>("ui-dump") || !mod->getSettingValue<bool>("ui-dump-auto")) return;
+    m_dumpReason = reason ? reason : "auto";
+    this->unschedule(schedule_selector(GifPopup::autoDump));
+    this->scheduleOnce(schedule_selector(GifPopup::autoDump), delay);
+}
+
+void GifPopup::autoDump(float) {
+    if (m_job || m_build) { this->scheduleOnce(schedule_selector(GifPopup::autoDump), 1.0f); return; }   // espera a que termine el calculo
+    this->dumpUi(m_dumpReason.empty() ? std::string("auto") : m_dumpReason, false);
+}
+
+void GifPopup::onDumpUi(CCObject*) {
+    this->dumpUi("manual", true);
+}
+
+void GifPopup::dumpUi(std::string const& reason, bool manual) {
+    auto* mod = Mod::get();
+    try {
+        namespace fs = std::filesystem;
+        std::string stamp, when;
+        nowStrings(stamp, when);
+        std::string safe;
+        for (char c : reason) safe += std::isalnum(static_cast<unsigned char>(c)) ? c : '-';
+        if (safe.empty()) safe = "ui";
+
+        // ---- la ventana: la caja de cada nodo se expresa en unidades de m_mainLayer (X desde la izquierda, Y desde arriba, como init())
+        CCNode* ref = m_mainLayer;
+        const CCSize rs = ref ? ref->getContentSize() : CCSize(kPopupW, kPopupH);
+        gdx::uic::Limits lim; lim.maxNodes = 3000; lim.maxChildren = 400; lim.maxDepth = 40;
+        gdx::uic::Collector col(ref, lim);
+        std::vector<gdx::ui::Node> nodes = col.run(this);
+        const std::vector<std::string> issues = gdx::ui::analyze(nodes, rs.width, rs.height);
+
+        std::ostringstream R;
+        R << "=== VOLCADO DE LA INTERFAZ - GIF Importer " << kModVersion << " ===\n"
+          << "fecha: " << when << "\nmotivo: " << reason << (manual ? " (boton UI)" : " (automatico)") << "\n" << platformString() << "\n\n"
+          << "[LEEME] Coordenadas 'ventana': X desde la izquierda e Y desde ARRIBA de la ventana, en las mismas unidades que usa GifPopup::init (put(x, y)).\n"
+          << "'pos / anc / tam / esc / giro' son las propiedades literales de cada nodo (en el espacio de su padre). 'vis=a/b': a = el nodo, b = el nodo y todos sus padres.\n"
+          << "'escPantalla' = escala real acumulada hasta la pantalla (1.000 = sin escalar; si no es 1 la ventana se esta animando o esta escalada).\n\n";
+        R << "## ENTORNO\n" << gdx::uic::dirInfo(CCDirector::get());
+        if (ref) {
+            const CCPoint o0 = ref->convertToWorldSpace(ccp(0, 0)), o1 = ref->convertToWorldSpace(ccp(1, 0));
+            R << "ventana (m_mainLayer): " << rs.width << " x " << rs.height << "   esquina inferior izquierda en la pantalla = (" << o0.x << ", " << o0.y << ")   escala en pantalla = "
+              << std::hypot(o1.x - o0.x, o1.y - o0.y) << "\n";
+        }
+        R << "\n## ESTADO DE LA VENTANA\n" << this->uiStateText() << "\n## AJUSTES DEL MOD\n" << this->settingsText() << "\n";
+        R << "## COMPROBACIONES AUTOMATICAS (" << issues.size() << ")\n";
+        if (issues.empty()) R << "(sin avisos)\n"; else for (auto const& l : issues) R << "- " << l << "\n";
+        R << "\n## TEXTOS (todos)\n" << gdx::ui::formatTexts(nodes)
+          << "\n## BOTONES / ITEMS DE MENU\n" << gdx::ui::formatButtons(nodes)
+          << "\n## ARBOL DE LA VENTANA (" << nodes.size() << " nodos" << (col.truncated() ? ", RECORTADO por los limites" : "") << ")\n" << gdx::ui::formatTree(nodes);
+        const std::string popupText = R.str();
+
+        // ---- toda la escena (editor incluido), en un segundo archivo: coordenadas de pantalla (Y hacia arriba)
+        std::string sceneText;
+        if (mod->getSettingValue<bool>("ui-dump-scene")) {
+            if (auto* scn = CCDirector::get()->getRunningScene()) {
+                gdx::uic::Limits sl; sl.maxNodes = 3000; sl.maxChildren = 60; sl.maxDepth = 30;
+                gdx::uic::Collector scol(nullptr, sl);
+                std::vector<gdx::ui::Node> sn = scol.run(scn);
+                sceneText = "=== ESCENA COMPLETA - GIF Importer " + std::string(kModVersion) + " (" + when + ") ===\n"
+                            "Coordenadas 'mundo' = pantalla de cocos (Y hacia ARRIBA). Se listan como maximo 60 hijos por nodo y 3000 nodos; el interior de las etiquetas (letras) no se lista.\n"
+                            "nodos listados: " + std::to_string(sn.size()) + (scol.truncated() ? " (RECORTADO)" : "") + "\n\n" + gdx::ui::formatTree(sn, true);
+            }
+        }
+
+        const fs::path root = mod->getSaveDir() / "ui-dumps";
+        std::error_code ec; fs::create_directories(root, ec);
+        const fs::path fMain = root / ("ui_" + stamp + "_" + safe + ".txt"), fScene = root / ("ui_" + stamp + "_" + safe + "_escena.txt");
+        auto put = [&](fs::path const& f, std::string const& data) { std::ofstream o(f, std::ios::binary); if (o) o.write(data.data(), std::streamsize(data.size())); };
+        put(fMain, popupText);
+        if (!sceneText.empty()) put(fScene, sceneText);
+
+        {   // solo se conservan los 24 archivos mas recientes (12 volcados)
+            std::vector<fs::path> all;
+            for (auto& e : fs::directory_iterator(root, ec)) if (e.is_regular_file(ec) && e.path().filename().string().rfind("ui_", 0) == 0) all.push_back(e.path());
+            std::sort(all.begin(), all.end());
+            for (size_t i = 0; i + 24 < all.size(); ++i) fs::remove(all[i], ec);
+        }
+
+        log::info("GIF Importer: volcado de UI en {} ({} nodos, {} avisos)", fMain.string(), nodes.size(), issues.size());
+        if (manual) {
+            utils::clipboard::write(popupText);                // para pegarlo directamente en el chat
+            Notification::create("Volcado de UI guardado y copiado al portapapeles (" + std::to_string(issues.size()) + " avisos). Carpeta: " + root.string(), NotificationIcon::Success, 6.f)->show();
+        }
+    } catch (...) {
+        if (manual) Notification::create("No se pudo guardar el volcado de la interfaz", NotificationIcon::Error, 4.f)->show();
+    }
+}
+
 void GifPopup::finishBuild(std::shared_ptr<BuildJob> job) {
     auto lel = LevelEditorLayer::get();
     if (!lel) return;
@@ -881,6 +1044,7 @@ void GifPopup::finishBuild(std::shared_ptr<BuildJob> job) {
 
     gdx::GifExportParams p;
     p.eo = makeExportOptions();
+    p.useToggle = mod->getSettingValue<bool>("use-toggles");      // Toggle triggers en vez de Alpha triggers
     CCPoint origin = placementOrigin();
     p.eo.originX = origin.x;
     p.eo.originY = origin.y;
@@ -903,8 +1067,8 @@ void GifPopup::finishBuild(std::shared_ptr<BuildJob> job) {
         const std::string pm = mod->getSettingValue<std::string>("place-mode");
         const bool sheet = pm.rfind("Hoja", 0) == 0, solo = pm.rfind("Solo", 0) == 0, calib = pm.rfind("Patron", 0) == 0;
         if (calib) {                                            // patron de calibracion: no usa el GIF
-            auto cr = gdx::buildCalibration(p.eo, p.trigX, p.baseGroup);   // + prueba de bucle (12 frames sinteticos)
-            this->startPlacement(cr.str, 400, "Patron de calibracion + prueba de bucle colocados (juega el nivel: 12 colores en orden)");
+            auto cr = gdx::buildCalibration(p.eo, p.trigX, p.baseGroup, p.useToggle);   // + prueba de bucle (12 frames sinteticos; con Toggle si el ajuste esta activo)
+            this->startPlacement(cr.str, 400, std::string("Patron de calibracion + prueba de bucle colocados") + (p.useToggle ? " (con Toggle triggers)" : "") + " (juega el nivel: 12 colores en orden)");
             this->onClose(nullptr);
             return;
         }
@@ -971,7 +1135,7 @@ void GifPopup::finishBuild(std::shared_ptr<BuildJob> job) {
     char msg[160];
     std::snprintf(msg, sizeof msg, "GIF colocado: %d frames, %zu objetos, grupos %d-%d", N, count, p.baseGroup, p.baseGroup + groupCount - 1);
     this->saveDiagnostics(job, p, str, "");
-    this->startPlacement(str, count, msg);
+    this->startPlacement(str, count, std::string(msg) + (p.useToggle ? " | con Toggle triggers" : ""));
     this->onClose(nullptr);
 }
 
@@ -979,7 +1143,7 @@ void GifPopup::onInfo(CCObject*) {
     FLAlertLayer::create(
         "GIF Importer (beta)",
         "Cada frame del GIF se convierte en objetos con el <cy>metodo</c> elegido y va en su propio <cy>grupo</c>.\n"
-        "Se crean <cy>Alpha triggers</c> (mostrar este frame, ocultar el anterior) y <cy>Spawn triggers</c> con el retardo real del GIF; "
+        "Se crean <cy>Alpha triggers</c> (o <cy>Toggle triggers</c> si activas \"Usar Toggle\" en Ajustes: menos lag al jugar) para mostrar este frame y ocultar el anterior, y <cy>Spawn triggers</c> con el retardo real del GIF; "
         "un Spawn final se llama a si mismo y la animacion se repite <cg>para siempre</c>.\n"
         "- <cg>Objetos por frame</c>: presupuesto de cada frame (se recorta si pasas del tope total de los ajustes).\n"
         "- <cg>Frames maximos</c>: si el GIF tiene mas, se reparten de forma uniforme y se conserva la duracion.\n"

@@ -1,4 +1,5 @@
-// Simulador de GD (modelo): parsea la cadena exportada, aplica HSV/canales/Color triggers/Alpha/Spawn y rasteriza con z-order.
+// Simulador de GD (modelo): parsea la cadena exportada, aplica HSV/canales/Color triggers/Alpha/Toggle/Spawn y rasteriza con z-order.
+// Alpha (1007, clave 35 = opacidad) y Toggle (1049, clave 56 = activar grupo) son los dos ABSOLUTOS: dejan el grupo visible (1) u oculto (0).
 #pragma once
 #include <algorithm>
 #include <map>
@@ -71,11 +72,11 @@ struct Sim {
         for (size_t i = 0; i < objs.size(); ++i) {
             const Obj& o = objs[i];
             if (o.id == 899 && !o.has(62)) chColor[int(o.geti(23))] = {uint8_t(o.geti(7)), uint8_t(o.geti(8)), uint8_t(o.geti(9))};   // Color trigger de arranque
-            if ((o.id == 1007 || o.id == 1268 || o.id == 899) && o.has(62)) for (int g : o.groups) trigsIn[g].push_back(int(i));
+            if ((o.id == 1007 || o.id == 1049 || o.id == 1268 || o.id == 899) && o.has(62)) for (int g : o.groups) trigsIn[g].push_back(int(i));
         }
         // triggers de posicion: se ejecutan al empezar (t=0), de izquierda a derecha
         std::vector<int> pos;
-        for (size_t i = 0; i < objs.size(); ++i) if ((objs[i].id == 1268 || objs[i].id == 1007) && !objs[i].has(62)) pos.push_back(int(i));
+        for (size_t i = 0; i < objs.size(); ++i) if ((objs[i].id == 1268 || objs[i].id == 1007 || objs[i].id == 1049) && !objs[i].has(62)) pos.push_back(int(i));
         std::stable_sort(pos.begin(), pos.end(), [&](int a, int b) { return objs[size_t(a)].x < objs[size_t(b)].x; });
         for (int i : pos) q.push({0, seq++, i});
     }
@@ -99,9 +100,9 @@ struct Sim {
                     const Obj& ob = objs[size_t(e.obj)];
                     int target = int(ob.geti(51));
                     const bool spawnTriggered = ob.has(62);
-                    if (ob.id == 1007) {
-                        if (spawnTriggered && opt.dropAlpha > 0 && U(rng) < opt.dropAlpha) continue;     // este Alpha se pierde
-                        opacity[target] = int(ob.geti(35, 1));
+                    if (ob.id == 1007 || ob.id == 1049) {
+                        if (spawnTriggered && opt.dropAlpha > 0 && U(rng) < opt.dropAlpha) continue;     // este Alpha / Toggle se pierde
+                        opacity[target] = ob.id == 1007 ? int(ob.geti(35, 1)) : int(ob.geti(56, 0) != 0);   // Toggle: clave 56 (activar grupo), por defecto desactivar
                     } else if (ob.id == 899) {                                                                // Color trigger spawn-triggered: color absoluto del canal
                         if (spawnTriggered && opt.dropAlpha > 0 && U(rng) < opt.dropAlpha) continue;
                         chColor[int(ob.geti(23))] = {uint8_t(ob.geti(7)), uint8_t(ob.geti(8)), uint8_t(ob.geti(9))};

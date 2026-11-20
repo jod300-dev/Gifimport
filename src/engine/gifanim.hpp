@@ -255,6 +255,12 @@ struct GifExportParams {
     double trigX = -30;               // x de los 2 triggers de arranque
     int objectIdAlpha = 1007;
     int objectIdSpawn = 1268;
+    // Ajuste "use-toggles": los triggers que MUESTRAN / OCULTAN un grupo se emiten como Toggle trigger (1049, clave 56 = activar grupo)
+    // en vez de Alpha trigger (1007, clave 35 = opacidad). Los dos son ABSOLUTOS (mostrar = 1, ocultar = 0), asi que toda la logica de
+    // los pasos idempotentes / autocorreccion sigue valiendo igual. Con Toggle los objetos ocultos se desactivan de verdad (GD no los
+    // dibuja ni los procesa) en vez de seguir dibujandose con opacidad 0: menos carga al jugar.
+    bool useToggle = false;
+    int objectIdToggle = 1049;
 };
 
 namespace detail {
@@ -264,7 +270,17 @@ inline void addTriggerHead(std::string& s, int id, double x, double y) {
     s += ",3,"; appendNum(s, y, 2);
     s += ",36,1";
 }
+// "Mostrar / ocultar un grupo" (opacity 1 / 0). Segun p.useToggle es un Alpha trigger (opacidad, sin fundido) o un Toggle trigger (activar grupo).
+// Mismo sitio, mismo grupo propio y mismo orden en los dos casos: lo unico que cambia es el id del trigger y la clave del valor.
 inline void addAlpha(std::string& s, const GifExportParams& p, double x, double y, int target, int opacity, int ownGroup) {
+    if (p.useToggle) {
+        addTriggerHead(s, p.objectIdToggle, x, y);
+        s += ",51,"; s += std::to_string(target);
+        s += ",56,"; s += opacity > 0 ? '1' : '0';
+        s += ",62,1,87,1,57,"; s += std::to_string(ownGroup);
+        s += ';';
+        return;
+    }
     addTriggerHead(s, p.objectIdAlpha, x, y);
     s += ",51,"; s += std::to_string(target);
     s += ",35,"; s += std::to_string(opacity);

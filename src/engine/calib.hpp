@@ -24,7 +24,7 @@ struct CalibResult { std::string str; Result hsv, chan; std::vector<std::array<u
 //   - la franja girando y el cuadrado blanco avanzando sin saltos
 //   - el bucle limpio: del ultimo frame (rosa) pasa directo al primero (rojo), sin que el ultimo desaparezca ni se quede un frame a medias
 // En el editor (sin jugar) se ve apilado: debe verse el frame 0 (rojo) completo encima.
-inline std::string buildLoopTest(GdExportOptions eo, double trigX, int baseGroup, double centerY) {
+inline std::string buildLoopTest(GdExportOptions eo, double trigX, int baseGroup, double centerY, bool useToggle = false) {
     const int N = 12;
     std::vector<Result> res; res.resize(size_t(N));
     GifPlan plan;
@@ -44,11 +44,11 @@ inline std::string buildLoopTest(GdExportOptions eo, double trigX, int baseGroup
         plan.idx.push_back(i); plan.delay.push_back(0.1);
     }
     plan.total = 0.1 * N;
-    GifExportParams p; p.eo = eo; p.eo.longSide = 120; p.eo.originY = centerY; p.eo.groupStr.clear(); p.eo.channels.clear(); p.baseGroup = baseGroup; p.trigX = trigX;
+    GifExportParams p; p.eo = eo; p.eo.longSide = 120; p.eo.originY = centerY; p.eo.groupStr.clear(); p.eo.channels.clear(); p.baseGroup = baseGroup; p.trigX = trigX; p.useToggle = useToggle;
     return buildGifString(res, plan, p, nullptr);
 }
 
-inline CalibResult buildCalibration(GdExportOptions eo, double trigX, int baseGroup = 0) {
+inline CalibResult buildCalibration(GdExportOptions eo, double trigX, int baseGroup = 0, bool useToggle = false) {
     CalibResult cr;
     const uint8_t RED[3] = {230, 30, 30}, BLUE[3] = {30, 60, 230}, GRAY[3] = {150, 150, 150}, GREEN[3] = {30, 180, 60}, BLACK[3] = {0, 0, 0};
     Result A; A.rasterW = 320; A.rasterH = 150; A.aspect = 320.f / 150.f;
@@ -101,7 +101,7 @@ inline CalibResult buildCalibration(GdExportOptions eo, double trigX, int baseGr
     cr.str = sA + ";" + sB + ";";                               // ';' final: appendColorTriggers concatena a continuacion
     appendColorTriggers(cr.str, cr.palette, kFirstColorChannel, trigX, eo.originY + 150 * 0.5 + 60);
     if (baseGroup > 0) {                                           // prueba de bucle debajo del patron (+ sus triggers y los 2 de arranque)
-        cr.str += buildLoopTest(eo, trigX - 150, baseGroup, eo.originY - 400);
+        cr.str += buildLoopTest(eo, trigX - 150, baseGroup, eo.originY - 400, useToggle);   // con "Usar Toggle" la prueba de bucle usa Toggle triggers
         cr.str += ";";
     }
     if (!cr.str.empty() && cr.str.back() == ';') cr.str.pop_back();

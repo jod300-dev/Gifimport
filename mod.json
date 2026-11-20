@@ -8,9 +8,9 @@
 	},
 	"id": "patasma.gif_importer",
 	"name": "GIF Importer",
-	"version": "v0.5.10-beta",
+	"version": "v0.5.11-beta",
 	"developer": "Patasma",
-	"description": "Importa GIFs animados al editor usando Alpha triggers + Spawn triggers en bucle infinito. Eliges objetos por frame y metodo de imagen (17 metodos + 18 por capas + 19 arbol de deltas + 20-29 capas LSA). BETA.",
+	"description": "Importa GIFs animados al editor usando Alpha triggers (o Toggle triggers, menos lag) + Spawn triggers en bucle infinito. Eliges objetos por frame y metodo de imagen (17 metodos + 18 por capas + 19 arbol de deltas + 20-29 capas LSA). BETA.",
 	"resources": {
 		"spritesheets": {
 			"GifBtn": [
@@ -72,6 +72,12 @@
 			"default": true,
 			"name": "Arrancar al inicio del nivel",
 			"description": "Los 2 triggers de arranque se colocan en x=-30 para que la animacion empiece al comenzar. Si lo desactivas, empiezan junto al borde izquierdo de la imagen (arranca cuando el jugador llega)."
+		},
+		"use-toggles": {
+			"type": "bool",
+			"default": false,
+			"name": "Usar Toggle triggers en vez de Alpha",
+			"description": "Para mostrar y ocultar cada frame usa <cy>Toggle triggers</c> (activar / desactivar grupo) en vez de <cy>Alpha triggers</c> (opacidad 1 / 0). Los frames ocultos quedan <cy>desactivados de verdad</c>: GD no los dibuja ni los procesa, en vez de seguir dibujando miles de objetos con opacidad 0, asi que al jugar <cg>hay menos lag</c>. La animacion se ve igual (misma logica, mismos grupos y mismo orden: solo cambia el tipo de trigger). Vale para todos los metodos. <cy>Consejo</c>: prueba primero con <cy>Modo al colocar = Patron de calibracion</c> (su prueba de bucle usa tambien este ajuste) y comprueba en GD que los 12 colores salen en orden."
 		},
 		"threads": {
 			"type": "int",
@@ -217,6 +223,24 @@
 			"default": false,
 			"name": "Guardar informe de diagnostico al colocar",
 			"description": "Cada vez que coloques un GIF se guarda, en la carpeta del mod <cy>diagnostics/</c>, un informe completo: <cy>informe.txt</c> (ajustes, GIF, plan de frames, estructura del metodo, estadisticas y comprobaciones automaticas), <cy>cadena.txt</c> (la cadena exacta de GD), <cy>objetos.tsv</c> y <cy>triggers.tsv</c> (posiciones y datos de cada objeto/trigger) y dos imagenes de comparacion (GIF original / lo que calculo el mod / diferencia). Se conservan los 8 mas recientes. Mandame esa carpeta cuando algo salga mal."
+		},
+		"ui-dump": {
+			"type": "bool",
+			"default": false,
+			"name": "Diagnostico de la interfaz (volcado de UI)",
+			"description": "Muestra un boton <cy>UI</c> en la ventana del importador (junto a Ajustes). Al pulsarlo guarda <cy>todo</c> lo relacionado con la interfaz en <cy>ui-dumps/ui_FECHA_manual.txt</c> (carpeta del mod) y lo <cg>copia al portapapeles</c>: cada nodo con su clase, id, posicion, ancla, tamano, escala, giro, z-order, visibilidad, color, opacidad, texto y fuente; estado de botones, checks y sliders; caja de cada elemento en unidades de la ventana; datos de pantalla (resolucion, escala); los ajustes del mod; y <cy>comprobaciones automaticas</c> (textos solapados, cosas fuera de la ventana, botones tapados o diminutos). Pega ese texto en el chat en vez de describir el error o mandar capturas. Colocalo con la ventana en el estado donde ves el problema."
+		},
+		"ui-dump-auto": {
+			"type": "bool",
+			"default": false,
+			"name": "Volcado de UI automatico",
+			"description": "Con el ajuste anterior activo, guarda ademas un volcado <cy>solo</c> (sin tocar nada) al abrir la ventana y cada vez que cambia su estado (GIF cargado, vista previa calculada...). Se conservan los 12 mas recientes. No toca el portapapeles."
+		},
+		"ui-dump-scene": {
+			"type": "bool",
+			"default": true,
+			"name": "Volcado de UI: incluir toda la escena",
+			"description": "Ademas del volcado de la ventana, guarda <cy>ui_FECHA_MOTIVO_escena.txt</c> con el arbol de nodos de toda la escena (el editor incluido, hasta 3000 nodos y 60 hijos por nodo). Util si el fallo es de otra parte de la pantalla, p. ej. el boton del importador en la barra del editor."
 		},
 		"title-layered": {
 			"name": "Capas (metodo 18)",

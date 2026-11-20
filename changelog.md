@@ -1,3 +1,19 @@
+# v0.5.11-beta
+Dos ajustes nuevos: **Toggle en vez de Alpha** (menos lag al jugar) y **volcado de la interfaz** (para arreglar fallos de UI sin capturas).
+- **Ajuste "Usar Toggle triggers en vez de Alpha"** (`use-toggles`, desactivado por defecto). Los triggers que muestran/ocultan cada frame pasan de Alpha (1007, clave 35 = opacidad) a **Toggle (1049, clave 56 = activar grupo)**.
+  Los dos son absolutos (mostrar = 1, ocultar = 0), asi que toda la logica (pasos idempotentes, autocorreccion, reafirmar los ultimos pasos) sigue igual: mismos grupos, mismas posiciones, mismo orden. Un solo punto de emision (`detail::addAlpha` en `gifanim.hpp`), asi que vale para los 29 metodos.
+  Con Toggle los frames ocultos quedan desactivados (GD no los dibuja ni los procesa) en vez de seguir dibujandose con opacidad 0. El "Patron de calibracion" (con su prueba de bucle de 12 frames) tambien usa el ajuste: es la forma rapida de comprobarlo en GD.
+  - Nuevo `tests/toggle_test.cpp`: para 14 metodos comprueba que la cadena Toggle es EXACTAMENTE la Alpha cambiando solo el id y la clave, y que el simulador dibuja los mismos pixeles en cada frame (2 vueltas), tambien con lag (saltos de 50 ms al reves) y triggers perdidos.
+  - El simulador (`tests/gdsim.hpp`) y las comprobaciones de estructura entienden Toggle. El informe de diagnostico cuenta Alpha/Toggle por separado, rellena la tabla `triggers.tsv` con la clave 56 y avisa si una cadena mezcla los dos.
+- **Ajuste "Diagnostico de la interfaz (volcado de UI)"** (`ui-dump`) con dos opciones mas (`ui-dump-auto`, `ui-dump-scene`). Muestra un boton **UI** en la ventana; al pulsarlo guarda `ui-dumps/ui_<fecha>_manual.txt` (y lo copia al portapapeles) con:
+  - cada nodo de la ventana: clase, id, tag, z, visibilidad (propia y efectiva), posicion, ancla, tamano, escala, giro, skew, color, opacidad, texto, fuente, estado de botones/checks/sliders, **caja en unidades de la ventana** (X desde la izquierda, Y desde arriba: las mismas que usa `init()`) y escala real hasta la pantalla;
+  - entorno (winSize, pixeles, factor de contenido, framebuffer), estado interno de la ventana, todos los ajustes del mod;
+  - tablas de textos y de botones y **comprobaciones automaticas**: textos solapados, texto sobre boton, botones solapados, elementos fuera de la ventana, tamano cero, texto minusculo, botones activos pero ocultos, valores NaN;
+  - con `ui-dump-scene`, un segundo archivo `_escena.txt` con el arbol de toda la escena (editor incluido); con `ui-dump-auto`, volcado automatico al abrir y al cambiar el estado (se conservan los 12 mas recientes).
+  - Motor sin Geode en `src/engine/uidump.hpp` (probado en `tests/uidump_test.cpp`) y recolector en `src/ui/UiCollect.hpp` (`tests/uicollect_test.cpp`, con un mock de cocos2d en `tests/mock/`). Las llamadas a bindings dudosos van con `if constexpr (requires ...)`: si no existen se omite ese dato y el mod compila igual.
+- La lista de ajustes del informe de colocacion se comparte con el volcado de UI (`GifPopup::settingsText`) e incluye los ajustes nuevos.
+- NO verificado en GD real ni compilado con el SDK de Geode (solo el simulador, g++ con un mock de cocos2d y stubs de Mod/Notification). Si algun binding no coincide, el compilador lo dira en una linea concreta.
+
 # v0.5.10-beta
 Fusion de la 0.5.9 (arreglos de los metodos 20/27 y del pintor) con las novedades de la 0.5.10.
 - **Procesamiento de los metodos 18-29: Mejorado / Clasico 0.5.5** (ajuste nuevo). Clasico = mediana 3x3, sin peso de bordes, sin tamano minimo ni formas orientadas, sin colores planos y "Calidad de calculo" de siempre:

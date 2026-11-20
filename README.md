@@ -53,6 +53,14 @@ Una animacion = un conjunto de capas y, por frame, el subconjunto visible (`engi
 ## Informe de diagnostico
 Ajuste `save-report`: al colocar guarda `informe.txt`, `cadena.txt`, `objetos.tsv`, `triggers.tsv`, `comparacion.png` y `detalle.png` en `diagnostics/` (carpeta de guardado del mod). Codigo: `engine/diag.hpp`; prueba: `tests/report_test.cpp`.
 
+## Toggle en vez de Alpha (ajuste `use-toggles`)
+Por defecto los frames se muestran/ocultan con **Alpha triggers** (opacidad 1/0). Con el ajuste activado se usan **Toggle triggers** (id 1049, clave 56 = activar grupo): los frames ocultos quedan desactivados en vez de dibujarse con opacidad 0, lo que reduce la carga al jugar.
+La logica es identica (Alpha y Toggle son absolutos): solo cambia el id del trigger y la clave del valor (`51,<grupo>,35,<0|1>,10,0` -> `51,<grupo>,56,<0|1>`). Un unico punto de emision: `detail::addAlpha` (`gifanim.hpp`). Prueba: `tests/toggle_test.cpp`. El Patron de calibracion tambien usa el ajuste.
+
+## Diagnostico de la interfaz (ajustes `ui-dump`, `ui-dump-auto`, `ui-dump-scene`)
+Activa **Diagnostico de la interfaz** y aparece un boton **UI** en la ventana. Pulsalo con la ventana en el estado donde ves el fallo: guarda `ui-dumps/ui_<fecha>_manual.txt` (carpeta de guardado del mod) y lo copia al portapapeles. Contiene cada nodo con sus propiedades literales, la caja en unidades de la ventana (X desde la izquierda, Y desde arriba, como `put(x, y)` en `init()`), textos, fuentes, estado de botones/checks/sliders, entorno, ajustes y comprobaciones automaticas (solapes, desbordes, botones tapados...). Pegalo en el chat en vez de describir el fallo o mandar capturas.
+Codigo: `src/engine/uidump.hpp` (formato y comprobaciones, sin Geode), `src/ui/UiCollect.hpp` (recorre los nodos), `GifPopup::dumpUi`. Pruebas: `tests/uidump_test.cpp`, `tests/uicollect_test.cpp` (mock de cocos2d en `tests/mock/`).
+
 ## Ventana
 Metodo (flechas, 17 de imagen + el 18 de capas + el 19 de arbol) · **Objetos por frame** (10–5000) · Lado largo · **Frames maximos** (2–300) · Escala de grises · GIF / Colocar / Ajustes.
 

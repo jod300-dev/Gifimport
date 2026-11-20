@@ -62,6 +62,7 @@ protected:
     void onPlace(CCObject*);
     void onInfo(CCObject*);
     void onSettings(CCObject*);
+    void onDumpUi(CCObject*);                                  // boton "UI" (ajuste "ui-dump"): guarda el volcado de la interfaz ahora mismo
     void onPrev(CCObject*) { stepMethod(-1); }
     void onNext(CCObject*) { stepMethod(+1); }
     void onPerFrameSlider(CCObject* sender);
@@ -80,6 +81,13 @@ protected:
     void finishBuild(std::shared_ptr<BuildJob> job);
     void saveDiagnostics(std::shared_ptr<BuildJob> const& job, gdx::GifExportParams const& p, std::string const& chain, std::string const& note);   // ajuste "save-report"
     void buildPreview();
+    // --- diagnostico de la interfaz (ajustes "ui-dump", "ui-dump-auto", "ui-dump-scene") ---
+    void dumpUi(std::string const& reason, bool manual);        // escribe ui_<fecha>_<motivo>.txt (+ _escena.txt) en <carpeta del mod>/ui-dumps/
+    void autoDump(float);                                       // volcado automatico (con espera: la ventana se anima al abrir y el calculo cambia textos)
+    void scheduleAutoDump(char const* reason, float delay);
+    void refreshDumpButton();                                   // muestra/oculta el boton UI segun el ajuste
+    std::string settingsText() const;                           // todos los ajustes del mod + estado de la ventana (informe y volcado)
+    std::string uiStateText() const;                            // estado interno de la ventana: textos, sliders, checks, vista previa
     void setStatus(std::string const& a, std::string const& b = "", std::string const& note = "");
 
     // Indice del metodo 18 (capas) en la lista de la ventana: va despues de los 17 metodos de imagen.
@@ -135,5 +143,7 @@ protected:
     CCLabelBMFont* m_statB = nullptr;
     CCLabelBMFont* m_noteLabel = nullptr;
     CCNode* m_previewHolder = nullptr;
+    CCMenuItemSpriteExtra* m_dumpBtn = nullptr;   // boton "UI"
+    std::string m_dumpReason;                     // motivo del proximo volcado automatico
     CCSprite* m_preview = nullptr;
 };

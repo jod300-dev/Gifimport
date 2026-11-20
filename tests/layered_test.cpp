@@ -68,7 +68,7 @@ int main(int argc, char** argv) {
     }
 
     // --- cadena de GD + simulacion de triggers + rasterizado de lo visible
-    GifExportParams p; p.baseGroup = 100; p.eo.longSide = 600;
+    GifExportParams p; p.baseGroup = 100; p.eo.longSide = 600; p.useToggle = getenv("TOGGLE") != nullptr;   // TOGGLE=1: Toggle triggers en vez de Alpha
     std::string err, str = buildAnimString(A, plan, p, &err);
     if (str.empty()) { std::cout << "FAIL string: " << err << "\n"; return 1; }
     auto objs = parse(str);
@@ -84,7 +84,7 @@ int main(int argc, char** argv) {
     if (chMode && (hsvObjs || ch1Objs || !colorTrig)) { std::cout << "FALLO: modo canales incorrecto\n"; return 1; }
     std::map<int,int> opacity; auto op = [&](int gid) { return opacity.count(gid) ? opacity[gid] : 1; };
     std::map<int,std::vector<int>> inGroup;
-    for (int i = 0; i < int(objs.size()); ++i) { int id = std::stoi(objs[size_t(i)].kv[1]); if (id == 1007 || id == 1268) for (int gg : objs[size_t(i)].groups) inGroup[gg].push_back(i); }
+    for (int i = 0; i < int(objs.size()); ++i) { int id = std::stoi(objs[size_t(i)].kv[1]); if (id == 1007 || id == 1049 || id == 1268) for (int gg : objs[size_t(i)].groups) inGroup[gg].push_back(i); }
     struct Ev { double t; int seq; int obj; bool operator<(const Ev& q) const { return t > q.t || (t == q.t && seq > q.seq); } };
     std::priority_queue<Ev> q; int seq = 0;
     for (int i = 0; i < int(objs.size()); ++i) if (std::stoi(objs[size_t(i)].kv[1]) == 1268 && !objs[size_t(i)].kv.count(62)) q.push({0, seq++, i});
@@ -94,6 +94,7 @@ int main(int argc, char** argv) {
     while (!q.empty() && q.top().t <= tEnd) {
         Ev e = q.top(); q.pop(); Obj& ob = objs[size_t(e.obj)]; int id = std::stoi(ob.kv[1]); int target = std::stoi(ob.kv[51]);
         if (id == 1007) opacity[target] = std::stoi(ob.kv[35]);
+        else if (id == 1049) opacity[target] = std::stoi(ob.kv[56]);
         else { double d = ob.kv.count(63) ? std::stod(ob.kv[63]) : 0.0; for (int ti : inGroup[target]) q.push({e.t + d, seq++, ti}); }
         if (!q.empty() && q.top().t == e.t) continue;
         log.push_back({e.t, opacity});
