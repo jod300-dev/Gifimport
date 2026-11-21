@@ -1,3 +1,16 @@
+# v0.5.12-beta
+Arreglos de la interfaz, detectados con el propio volcado de UI (ui_..._manual.txt) y las capturas.
+- **Descripcion del metodo**: tenia 338 px de ancho en una ventana de 430 y se salia por la derecha y por debajo de la vista previa. Ahora se encaja en una caja de 248 x 34 entre el nombre del metodo y los sliders (`FitText.hpp`): prueba escalas de mayor a menor y MIDE la caja real, asi que no depende de como cuente GD el ancho de ajuste. La mas larga (236 caracteres) cabe a escala 0,46 (maxima 0,60).
+- **Nombre del metodo**: quedaba a 0,8 px de las flechas; ahora tiene 6 px de aire a cada lado (ancho maximo 203,5) y las flechas llegan justo a los bordes de la columna.
+- **Fila de botones**: Ajustes y UI estaban en y=270 (pegados al borde de abajo) y GIF / Colocar en y=258, con tamanos de texto distintos (0,4 y 0,6). Ahora los cuatro comparten Y (262), altura (39), escala de texto (0,6) y huecos (8 px): Ajustes y UI pegados al borde izquierdo de la vista previa (x=14), GIF y Colocar al borde derecho de la columna derecha (x=416). 8,5 px de margen abajo.
+- **Boton de info**: pasa a la esquina superior derecha de la ventana (x=413, y=17), a la misma distancia del borde derecho que del superior.
+- **Cuadro de info**: era un FLAlertLayer que crecia con el texto (~900 caracteres) hasta salirse de la pantalla y tapar el OK. Ahora es una ventana con **scroll** y boton OK siempre visible (MDPopup), con el texto reordenado en parrafos y lista. Los avisos de error largos usan la misma ventana.
+- **Nota y estado** (izquierda): la nota se encaja en una caja de 150 x 22 y ya no llega a los botones; el estado B baja 2 px para no rozar al A.
+- Valores de la derecha alineados al borde de la columna (x=416, antes 418).
+- Toda la geometria vive en `src/ui/Layout.hpp` (la usan `init()` y el test). Nuevo `tests/layout_test.cpp`: textos reales de los 29 metodos con una etiqueta simulada (las dos interpretaciones posibles del ancho de ajuste), fila de botones con los anchos medidos en el volcado, alineaciones, huecos y ausencia de solapes.
+- El analizador del volcado ya no avisa de los botones internos ocultos de los checks (es normal) y trata el boton de cerrar (sobresale a proposito) como INFO.
+- NO compilado con el SDK de Geode (v0.5.11 si compilo en tu build). Lo nuevo que depende de Geode: `MDPopup::create(titulo, texto, "OK")`, `CCLabelBMFont::setWidth` (si no existe el ajuste lo ignora) y las posiciones; el resto es geometria probada.
+
 # v0.5.11-beta
 Dos ajustes nuevos: **Toggle en vez de Alpha** (menos lag al jugar) y **volcado de la interfaz** (para arreglar fallos de UI sin capturas).
 - **Ajuste "Usar Toggle triggers en vez de Alpha"** (`use-toggles`, desactivado por defecto). Los triggers que muestran/ocultan cada frame pasan de Alpha (1007, clave 35 = opacidad) a **Toggle (1049, clave 56 = activar grupo)**.
@@ -5,13 +18,14 @@ Dos ajustes nuevos: **Toggle en vez de Alpha** (menos lag al jugar) y **volcado 
   Con Toggle los frames ocultos quedan desactivados (GD no los dibuja ni los procesa) en vez de seguir dibujandose con opacidad 0. El "Patron de calibracion" (con su prueba de bucle de 12 frames) tambien usa el ajuste: es la forma rapida de comprobarlo en GD.
   - Nuevo `tests/toggle_test.cpp`: para 14 metodos comprueba que la cadena Toggle es EXACTAMENTE la Alpha cambiando solo el id y la clave, y que el simulador dibuja los mismos pixeles en cada frame (2 vueltas), tambien con lag (saltos de 50 ms al reves) y triggers perdidos.
   - El simulador (`tests/gdsim.hpp`) y las comprobaciones de estructura entienden Toggle. El informe de diagnostico cuenta Alpha/Toggle por separado, rellena la tabla `triggers.tsv` con la clave 56 y avisa si una cadena mezcla los dos.
-- **Ajuste "Diagnostico de la interfaz (volcado de UI)"** (`ui-dump`) con dos opciones mas (`ui-dump-auto`, `ui-dump-scene`). Muestra un boton **UI** en la ventana; al pulsarlo guarda `ui-dumps/ui_<fecha>_manual.txt` (y lo copia al portapapeles) con:
+- **Ajuste "Diagnostico de la interfaz (volcado de UI)"** (`ui-dump`) con dos opciones mas (`ui-dump-auto`, `ui-dump-scene`). Muestra un boton **UI** en la ventana; al pulsarlo guarda `ui-dumps/ui_FECHA_manual.txt` (y lo copia al portapapeles) con:
   - cada nodo de la ventana: clase, id, tag, z, visibilidad (propia y efectiva), posicion, ancla, tamano, escala, giro, skew, color, opacidad, texto, fuente, estado de botones/checks/sliders, **caja en unidades de la ventana** (X desde la izquierda, Y desde arriba: las mismas que usa `init()`) y escala real hasta la pantalla;
   - entorno (winSize, pixeles, factor de contenido, framebuffer), estado interno de la ventana, todos los ajustes del mod;
   - tablas de textos y de botones y **comprobaciones automaticas**: textos solapados, texto sobre boton, botones solapados, elementos fuera de la ventana, tamano cero, texto minusculo, botones activos pero ocultos, valores NaN;
   - con `ui-dump-scene`, un segundo archivo `_escena.txt` con el arbol de toda la escena (editor incluido); con `ui-dump-auto`, volcado automatico al abrir y al cambiar el estado (se conservan los 12 mas recientes).
   - Motor sin Geode en `src/engine/uidump.hpp` (probado en `tests/uidump_test.cpp`) y recolector en `src/ui/UiCollect.hpp` (`tests/uicollect_test.cpp`, con un mock de cocos2d en `tests/mock/`). Las llamadas a bindings dudosos van con `if constexpr (requires ...)`: si no existen se omite ese dato y el mod compila igual.
 - La lista de ajustes del informe de colocacion se comparte con el volcado de UI (`GifPopup::settingsText`) e incluye los ajustes nuevos.
+- CI: el build de Windows usa el runner `windows-2022` (`windows-latest` pasó a Visual Studio 2026 y fallaba con STL1000 en fmt/arc, antes de compilar el mod).
 - NO verificado en GD real ni compilado con el SDK de Geode (solo el simulador, g++ con un mock de cocos2d y stubs de Mod/Notification). Si algun binding no coincide, el compilador lo dira en una linea concreta.
 
 # v0.5.10-beta

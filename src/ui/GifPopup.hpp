@@ -145,5 +145,6 @@ protected:
     CCNode* m_previewHolder = nullptr;
     CCMenuItemSpriteExtra* m_dumpBtn = nullptr;   // boton "UI"
     std::string m_dumpReason;                     // motivo del proximo volcado automatico
+    std::string m_lastDesc;                       // ultima descripcion de metodo encajada (para no recalcularla al mover los sliders)
     CCSprite* m_preview = nullptr;
 };

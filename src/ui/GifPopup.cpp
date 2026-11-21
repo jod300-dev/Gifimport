@@ -12,12 +12,16 @@
 #include <fstream>
 #include "diag.hpp"
 #include "UiCollect.hpp"      // volcado de la interfaz (ajuste "ui-dump")
+#include "Layout.hpp"         // geometria de la ventana (la misma que prueba tests/layout_test.cpp)
+#include "FitText.hpp"        // encaje de texto en una caja
 #include <cctype>
 
+namespace wlay = gdx::layout;
+
 namespace {
-    constexpr char const* kModVersion = "v0.5.11-beta";
-    constexpr float kPopupW = 430.f, kPopupH = 290.f;
-    constexpr float kPrevSize = 140.f;
+    constexpr char const* kModVersion = "v0.5.12-beta";
+    constexpr float kPopupW = wlay::kW, kPopupH = wlay::kH;
+    constexpr float kPrevSize = wlay::kPrevSize;
     constexpr int kMethodCount = int(gdx::Method::Ascii);          // metodos 1-17 (el ASCII no sirve para animar)
     constexpr int kMethodTotal = kMethodCount + 2 + 10;            // + metodo 18 (capas), 19 (arbol de deltas) y 20-29 (capas LSA)
     constexpr int kMinPF = 10, kMaxPF = 5000;                      // objetos por frame
@@ -41,6 +45,13 @@ namespace {
         if (q == "Ultra") return 5;
         return 1;
     }
+    using gdx::fit::fitWrapped;                                       // texto dentro de una caja (nada se sale ni se pisa): ver FitText.hpp
+    // Avisos: los cortos en un FLAlertLayer; los largos (errores con mucho texto) en una ventana con SCROLL y boton OK siempre visible.
+    void showAlert(char const* title, std::string const& text) {
+        if (text.size() <= 180) FLAlertLayer::create(title, text.c_str(), "OK")->show();
+        else MDPopup::create(title, text, "OK")->show();
+    }
+
     std::string platformString() {
         std::string r = "plataforma: ";
 #ifdef GEODE_PLATFORM_NAME
@@ -231,14 +242,14 @@ bool GifPopup::init(EditorUI* editor) {
     hint->setOpacity(120);
     hint->setPosition({kPrevSize / 2, kPrevSize / 2});
     m_previewHolder->addChild(hint);
-    put(m_previewHolder, 84.f, 112.f);
+    put(m_previewHolder, wlay::kLeftCx, wlay::kPrevCy);
 
-    m_statA = label("Elige un GIF animado", "chatFont.fnt", 0.85f, 84.f, 194.f);
-    m_statB = label("", "chatFont.fnt", 0.75f, 84.f, 207.f);
-    m_noteLabel = CCLabelBMFont::create("", "chatFont.fnt", 150.f, kCCTextAlignmentCenter);
+    m_statA = label("Elige un GIF animado", "chatFont.fnt", 0.85f, wlay::kLeftCx, wlay::kStatACy);
+    m_statB = label("", "chatFont.fnt", 0.75f, wlay::kLeftCx, wlay::kStatBCy);
+    m_noteLabel = CCLabelBMFont::create("", "chatFont.fnt", wlay::kNoteMaxW, kCCTextAlignmentCenter);
     m_noteLabel->setScale(0.6f);
     m_noteLabel->setColor({255, 200, 80});
-    put(m_noteLabel, 84.f, 236.f);
+    put(m_noteLabel, wlay::kLeftCx, wlay::kNoteCy);                     // la nota se encaja en una caja de 150 x 22 (ver setStatus): no llega a los botones
 
     // ============ derecha ============
     auto arrow = [&](bool flip, SEL_MenuHandler cb, float x, float y) {
@@ -247,30 +258,30 @@ bool GifPopup::init(EditorUI* editor) {
         spr->setFlipX(flip);
         putBtn(CCMenuItemSpriteExtra::create(spr, this, cb), x, y);
     };
-    arrow(false, menu_selector(GifPopup::onPrev), 178.f, 52.f);
-    arrow(true,  menu_selector(GifPopup::onNext), 406.f, 52.f);
-    m_methodLabel = label("", "bigFont.fnt", 0.5f, 292.f, 52.f);
-    m_descLabel = CCLabelBMFont::create("", "chatFont.fnt", 380.f, kCCTextAlignmentCenter);
-    m_descLabel->setScale(0.66f);
-    put(m_descLabel, 292.f, 80.f);
+    arrow(false, menu_selector(GifPopup::onPrev), wlay::kArrowCxL, wlay::kArrowCy);
+    arrow(true,  menu_selector(GifPopup::onNext), wlay::kArrowCxR, wlay::kArrowCy);
+    m_methodLabel = label("", "bigFont.fnt", 0.5f, wlay::kRightCx, wlay::kArrowCy);
+    m_descLabel = CCLabelBMFont::create("", "chatFont.fnt", wlay::kDescMaxW, kCCTextAlignmentCenter);
+    m_descLabel->setScale(0.6f);
+    put(m_descLabel, wlay::kRightCx, wlay::kDescCy);                    // se encaja en la caja de 248 x 34 entre el nombre del metodo y los sliders (ver refreshLabels)
 
-    label("Objetos por frame", "bigFont.fnt", 0.34f, 168.f, 108.f, 0.f);
-    m_perFrameValue = label("", "bigFont.fnt", 0.34f, 418.f, 108.f, 1.f);
+    label("Objetos por frame", "bigFont.fnt", 0.34f, wlay::kRightL, 108.f, 0.f);
+    m_perFrameValue = label("", "bigFont.fnt", 0.34f, wlay::kRightR, 108.f, 1.f);
     m_perFrameSlider = Slider::create(this, menu_selector(GifPopup::onPerFrameSlider), 0.78f);
     m_perFrameSlider->setValue(pfToSlider(m_perFrame));
-    put(m_perFrameSlider, 292.f, 124.f);
+    put(m_perFrameSlider, wlay::kRightCx, 124.f);
 
-    label("Lado largo", "bigFont.fnt", 0.34f, 168.f, 146.f, 0.f);
-    m_sizeValue = label("", "bigFont.fnt", 0.34f, 418.f, 146.f, 1.f);
+    label("Lado largo", "bigFont.fnt", 0.34f, wlay::kRightL, 146.f, 0.f);
+    m_sizeValue = label("", "bigFont.fnt", 0.34f, wlay::kRightR, 146.f, 1.f);
     m_sizeSlider = Slider::create(this, menu_selector(GifPopup::onSizeSlider), 0.78f);
     m_sizeSlider->setValue(sizeToSlider(m_sizeU));
-    put(m_sizeSlider, 292.f, 162.f);
+    put(m_sizeSlider, wlay::kRightCx, 162.f);
 
-    label("Frames maximos", "bigFont.fnt", 0.34f, 168.f, 184.f, 0.f);
-    m_framesValue = label("", "bigFont.fnt", 0.34f, 418.f, 184.f, 1.f);
+    label("Frames maximos", "bigFont.fnt", 0.34f, wlay::kRightL, 184.f, 0.f);
+    m_framesValue = label("", "bigFont.fnt", 0.34f, wlay::kRightR, 184.f, 1.f);
     m_framesSlider = Slider::create(this, menu_selector(GifPopup::onFramesSlider), 0.78f);
     m_framesSlider->setValue(framesToSlider(m_maxFrames));
-    put(m_framesSlider, 292.f, 200.f);
+    put(m_framesSlider, wlay::kRightCx, 200.f);
 
     m_chkGray = CCMenuItemToggler::createWithStandardSprites(this, menu_selector(GifPopup::onGray), 0.5f);
     m_chkGray->toggle(m_gray);
@@ -281,17 +292,32 @@ bool GifPopup::init(EditorUI* editor) {
     putBtn(m_chkChan, 300.f, 224.f);
     if (auto* l = label("Canales (sin HSV)", "bigFont.fnt", 0.28f, 312.f, 224.f, 0.f)) l->limitLabelWidth(106.f, 0.28f, 0.15f);
 
-    auto pickBtn = CCMenuItemSpriteExtra::create(ButtonSprite::create("GIF", "bigFont.fnt", "GJ_button_01.png", 0.6f), this, menu_selector(GifPopup::onPick));
-    putBtn(pickBtn, 226.f, 258.f);
-    auto placeBtn = CCMenuItemSpriteExtra::create(ButtonSprite::create("Colocar", "bigFont.fnt", "GJ_button_02.png", 0.6f), this, menu_selector(GifPopup::onPlace));
-    putBtn(placeBtn, 332.f, 258.f);
-    auto infoBtn = CCMenuItemSpriteExtra::create(CCSprite::createWithSpriteFrameName("GJ_infoIcon_001.png"), this, menu_selector(GifPopup::onInfo));
-    putBtn(infoBtn, 414.f, 258.f);
-    auto setBtn = CCMenuItemSpriteExtra::create(ButtonSprite::create("Ajustes", "bigFont.fnt", "GJ_button_04.png", 0.4f), this, menu_selector(GifPopup::onSettings));
-    putBtn(setBtn, 40.f, 270.f);
-    m_dumpBtn = CCMenuItemSpriteExtra::create(ButtonSprite::create("UI", "bigFont.fnt", "GJ_button_05.png", 0.4f), this, menu_selector(GifPopup::onDumpUi));
+    // ---- fila de botones: UNA sola fila (misma Y, misma altura de 39, misma escala de texto). Ajustes y UI pegados al borde izquierdo de la vista previa;
+    //      GIF y Colocar pegados al borde derecho de la columna derecha. El ancho real de cada boton lo da su ButtonSprite.
+    auto mkBtn = [&](char const* text, char const* frame, SEL_MenuHandler cb) {
+        return CCMenuItemSpriteExtra::create(ButtonSprite::create(text, "bigFont.fnt", frame, wlay::kBtnTextScale), this, cb);
+    };
+    auto putLeft = [&](CCMenuItemSpriteExtra* b, float left) {            // devuelve el borde derecho del boton
+        const float w = b->getContentSize().width;
+        putBtn(b, wlay::centerFromLeft(left, w), wlay::kBtnRowY);
+        return left + w;
+    };
+    auto putRight = [&](CCMenuItemSpriteExtra* b, float right) {          // devuelve el borde izquierdo del boton
+        const float w = b->getContentSize().width;
+        putBtn(b, wlay::centerFromRight(right, w), wlay::kBtnRowY);
+        return right - w;
+    };
+    auto setBtn = mkBtn("Ajustes", "GJ_button_04.png", menu_selector(GifPopup::onSettings));
+    m_dumpBtn = mkBtn("UI", "GJ_button_05.png", menu_selector(GifPopup::onDumpUi));
     m_dumpBtn->setID("ui-dump-button"_spr);
-    putBtn(m_dumpBtn, 104.f, 270.f);
+    putLeft(m_dumpBtn, putLeft(setBtn, wlay::kLeftL) + wlay::kBtnGap);
+    auto pickBtn = mkBtn("GIF", "GJ_button_01.png", menu_selector(GifPopup::onPick));
+    auto placeBtn = mkBtn("Colocar", "GJ_button_02.png", menu_selector(GifPopup::onPlace));
+    putRight(pickBtn, putRight(placeBtn, wlay::kRightR) - wlay::kBtnGap);
+
+    // ---- boton de info: esquina superior derecha (la X de cerrar esta en la superior izquierda)
+    auto infoBtn = CCMenuItemSpriteExtra::create(CCSprite::createWithSpriteFrameName("GJ_infoIcon_001.png"), this, menu_selector(GifPopup::onInfo));
+    putBtn(infoBtn, wlay::kInfoCx, wlay::kInfoCy);
     this->refreshDumpButton();                                            // solo se ve con el ajuste "Guardar volcado de la interfaz"
     this->scheduleAutoDump("abrir", 1.5f);                                // (solo con "ui-dump-auto") espera a que termine la animacion de apertura
 
@@ -303,20 +329,20 @@ bool GifPopup::init(EditorUI* editor) {
 // ------------------------------------------------------------- etiquetas ---
 
 void GifPopup::refreshLabels() {
+    std::string name, desc;
     if (layered()) {
-        if (lsaKind() > 0) {
-            m_methodLabel->setString(gdx::lsa::methodName(lsaKind()));
-            m_descLabel->setString(gdx::lsa::methodDesc(lsaKind()));
-        } else {
-            m_methodLabel->setString(treeMode() ? gdx::treeName() : gdx::layeredName());
-            m_descLabel->setString(treeMode() ? gdx::treeDesc() : gdx::layeredDesc());
-        }
+        if (lsaKind() > 0) { name = gdx::lsa::methodName(lsaKind()); desc = gdx::lsa::methodDesc(lsaKind()); }
+        else { name = treeMode() ? gdx::treeName() : gdx::layeredName(); desc = treeMode() ? gdx::treeDesc() : gdx::layeredDesc(); }
     } else {
         auto const& info = gdx::methodInfo(method());
-        m_methodLabel->setString(info.name);
-        m_descLabel->setString(info.desc);
+        name = info.name; desc = info.desc;
     }
-    m_methodLabel->limitLabelWidth(210.f, 0.5f, 0.2f);
+    m_methodLabel->setString(name.c_str());
+    m_methodLabel->limitLabelWidth(wlay::kTitleMaxW, 0.5f, 0.2f);    // con aire a los dos lados: no toca las flechas
+    if (desc != m_lastDesc) {                                     // solo si cambia el metodo (refreshLabels tambien corre al mover los sliders)
+        m_lastDesc = desc;
+        fitWrapped(m_descLabel, desc, wlay::kDescMaxW, wlay::kDescMaxH, 0.6f, 0.3f);
+    }
 
     char buf[64];
     {   // si el "Tope total de objetos" recorta el presupuesto, se muestra el valor que de verdad se aplica
@@ -345,7 +371,7 @@ void GifPopup::setStatus(std::string const& a, std::string const& b, std::string
     m_statA->limitLabelWidth(150.f, 0.85f, 0.4f);
     m_statB->setString(b.c_str());
     m_statB->limitLabelWidth(150.f, 0.75f, 0.4f);
-    m_noteLabel->setString(note.c_str());
+    fitWrapped(m_noteLabel, note, wlay::kNoteMaxW, wlay::kNoteMaxH, 0.6f, 0.4f);
     this->scheduleAutoDump("estado", 1.0f);
 }
 
@@ -1086,7 +1112,7 @@ void GifPopup::finishBuild(std::shared_ptr<BuildJob> job) {
             std::string e2;
             std::string s2 = gdx::buildFrameSheet(frames, p, pal, firstCh, solo, &e2);
             if (s2.empty()) {
-                FLAlertLayer::create("GIF Importer", e2.empty() ? "No se pudo generar la hoja de frames." : e2.c_str(), "OK")->show();
+                showAlert("GIF Importer", e2.empty() ? std::string("No se pudo generar la hoja de frames.") : e2);
                 this->applyPreview(nullptr);
                 return;
             }
@@ -1112,7 +1138,7 @@ void GifPopup::finishBuild(std::shared_ptr<BuildJob> job) {
                             : (job->useCh ? gdx::buildGifStringCh(job->results, job->plan, p, job->palette, &err)
                                           : gdx::buildGifString(job->results, job->plan, p, &err));
     if (str.empty()) {
-        FLAlertLayer::create("GIF Importer", err.empty() ? "No se pudo generar el GIF." : err.c_str(), "OK")->show();
+        showAlert("GIF Importer", err.empty() ? std::string("No se pudo generar el GIF.") : err);
         this->applyPreview(nullptr);
         return;
     }
@@ -1128,7 +1154,7 @@ void GifPopup::finishBuild(std::shared_ptr<BuildJob> job) {
     if (long(count) > long(this->editorRoom())) {          // GD cortaria la cadena y se perderian objetos: mejor no colocar nada
         char em[200];
         std::snprintf(em, sizeof em, "El GIF necesita %zu objetos y en el editor solo caben %d mas (limite 200000). Baja los objetos por frame o los frames.", count, this->editorRoom());
-        FLAlertLayer::create("GIF Importer", em, "OK")->show();
+        showAlert("GIF Importer", em);
         this->applyPreview(nullptr);
         return;
     }
@@ -1140,17 +1166,20 @@ void GifPopup::finishBuild(std::shared_ptr<BuildJob> job) {
 }
 
 void GifPopup::onInfo(CCObject*) {
-    FLAlertLayer::create(
+    // MDPopup: ventana con SCROLL y boton OK siempre visible (el FLAlertLayer de antes crecia con el texto y se salia de la pantalla).
+    // Es markdown: parrafos separados por una linea en blanco, listas con "- ", colores con <cy>, <cg>, <cr>.
+    MDPopup::create(
         "GIF Importer (beta)",
-        "Cada frame del GIF se convierte en objetos con el <cy>metodo</c> elegido y va en su propio <cy>grupo</c>.\n"
-        "Se crean <cy>Alpha triggers</c> (o <cy>Toggle triggers</c> si activas \"Usar Toggle\" en Ajustes: menos lag al jugar) para mostrar este frame y ocultar el anterior, y <cy>Spawn triggers</c> con el retardo real del GIF; "
-        "un Spawn final se llama a si mismo y la animacion se repite <cg>para siempre</c>.\n"
+        "Cada frame del GIF se convierte en objetos con el <cy>metodo</c> elegido y va en su propio <cy>grupo</c>.\n\n"
+        "Para animarlo se crean <cy>Alpha triggers</c> (o <cy>Toggle triggers</c> si activas \"Usar Toggle\" en Ajustes: menos lag al jugar) que muestran este frame y ocultan el anterior, "
+        "y <cy>Spawn triggers</c> con el retardo real del GIF. Un Spawn final se llama a si mismo y la animacion se repite <cg>para siempre</c>.\n\n"
         "- <cg>Objetos por frame</c>: presupuesto de cada frame (se recorta si pasas del tope total de los ajustes).\n"
         "- <cg>Frames maximos</c>: si el GIF tiene mas, se reparten de forma uniforme y se conserva la duracion.\n"
         "- En el editor los frames se ven superpuestos: <cy>dale a jugar</c> para ver la animacion.\n"
-        "- <cg>Metodo 19 (arbol de deltas)</c>: cada frame se predice del <cy>frame mas parecido</c> y solo pinta lo que cambia; lo mostrado es el camino fondo -> frame. Es el de mas calidad por objeto.\n"
-        "- <cg>Metodo 18 (capas)</c>: lo quieto se traza <cy>una sola vez</c>, mas unas poses de reposo y, por frame, <cy>solo lo que cambia</c>. \"Objetos por frame\" x frames es el total que se reparte entre las capas: mas nitidez con los mismos objetos.\n"
-        "- Los triggers de arranque van en x=-30 (inicio del nivel); cambialo en Ajustes.\n"
+        "- Los triggers de arranque van en x=-30 (inicio del nivel); cambialo en Ajustes.\n\n"
+        "<cg>Metodo 19 (arbol de deltas)</c>: cada frame se predice del <cy>frame mas parecido</c> y solo pinta lo que cambia. Es el de mas calidad por objeto.\n\n"
+        "<cg>Metodo 18 (capas)</c>: lo quieto se traza <cy>una sola vez</c>, mas unas poses de reposo y, por frame, <cy>solo lo que cambia</c>. "
+        "\"Objetos por frame\" x frames es el total que se reparte entre las capas: mas nitidez con los mismos objetos.\n\n"
         "No se puede deshacer: <cr>guarda antes</c>.",
         "OK"
     )->show();

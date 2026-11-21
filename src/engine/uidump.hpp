@@ -113,15 +113,23 @@ inline std::vector<std::string> analyze(std::vector<Node> const& ns, float rootW
         if (!std::isfinite(a.x) || !std::isfinite(a.y) || !std::isfinite(a.w) || !std::isfinite(a.h) || !std::isfinite(a.sx) || !std::isfinite(a.sy) ||
             (a.hasBox && (!std::isfinite(a.bx0) || !std::isfinite(a.by0) || !std::isfinite(a.bx1) || !std::isfinite(a.by1))))
             out.push_back("PROBLEMA valor no finito (NaN/inf) en " + name(a));
-        if (a.interactive && a.enabled && !a.effVisible) out.push_back("AVISO boton ACTIVO pero oculto (recibe toques sin verse): " + label(a));
+        const bool inToggler = a.parent >= 0 && size_t(a.parent) < N && ns[size_t(a.parent)].kind == "toggler";   // el check lleva dentro dos botones y siempre oculta uno: es normal
+        if (a.interactive && a.enabled && !a.effVisible && !inToggler) out.push_back("AVISO boton ACTIVO pero oculto (recibe toques sin verse): " + label(a));
         if (!(isText(a) || isBtn(a)) || !shown(a)) continue;
         if (isText(a) && a.text.empty()) continue;
         if (bw(a) <= 0.01f || bh(a) <= 0.01f) out.push_back("PROBLEMA tamano cero: " + label(a));
         if (isText(a) && bh(a) < 6.f && bh(a) > 0.01f) out.push_back(sfmt("AVISO texto muy pequeno (alto %.1f px): ", bh(a)) + label(a));
         if (isBtn(a) && std::min(bw(a), bh(a)) < 20.f && bw(a) > 0.01f) out.push_back(sfmt("INFO boton pequeno para tocar (%.1fx%.1f): ", bw(a), bh(a)) + label(a));
         const float m = 1.f;   // margen de tolerancia
-        if (a.bx0 < -m || a.by0 < -m || a.bx1 > rootW + m || a.by1 > rootH + m)
-            out.push_back(sfmt("%s fuera de la ventana (%.1f,%.1f)-(%.1f,%.1f) y la ventana mide %.0fx%.0f%s: ", isText(a) ? "PROBLEMA" : "AVISO", a.bx0, a.by0, a.bx1, a.by1, rootW, rootH, isText(a) ? "" : " (el boton de cerrar de los popups sobresale a proposito)") + label(a));
+        const float over = std::max(std::max(-a.bx0, -a.by0), std::max(a.bx1 - rootW, a.by1 - rootH));
+        if (over > m) {
+            if (isText(a))
+                out.push_back(sfmt("PROBLEMA fuera de la ventana (%.1f,%.1f)-(%.1f,%.1f) y la ventana mide %.0fx%.0f (sobresale %.1f px): ", a.bx0, a.by0, a.bx1, a.by1, rootW, rootH, over) + label(a));
+            else if (over <= 20.f)   // el boton de cerrar de los popups de Geode sobresale a proposito
+                out.push_back(sfmt("INFO boton sobresale %.1f px de la ventana (normal en el boton de cerrar): ", over) + label(a));
+            else
+                out.push_back(sfmt("AVISO boton fuera de la ventana (%.1f,%.1f)-(%.1f,%.1f), sobresale %.1f px: ", a.bx0, a.by0, a.bx1, a.by1, over) + label(a));
+        }
     }
     for (size_t i = 0; i < N; ++i) for (size_t j = i + 1; j < N; ++j) {
         auto const& a = ns[i]; auto const& b = ns[j];

@@ -26,13 +26,20 @@ int main() {
     ns.push_back(mk("0.12", "texto", 20, 40, 60, 50, "NaN")); ns.back().x = NAN;    // PROBLEMA
     ns.push_back(mk("0.13", "texto", 300, 10, 340, 30, "oculto")); ns.back().effVisible = false;
     ns.push_back(mk("0.14", "texto", 300, 10, 340, 30, "no se ve por op=0")); ns.back().op = 0;
+    ns.push_back(mk("0.15", "toggler", 156, 206, 191, 241)); ns.back().interactive = true;
+    ns.back().idx = int(ns.size()) - 1;
+    ns.push_back(mk("0.15.0", "boton", 156, 206, 191, 241)); ns.back().effVisible = false; ns.back().parent = int(ns.size()) - 2;   // hijo oculto de un check: NO se avisa
+    ns.push_back(mk("0.16", "boton", -15, -16, 21, 22));                                                                            // boton de cerrar: sobresale 16 px -> INFO, no AVISO
+    ns.push_back(mk("0.17", "boton", 400, 100, 470, 130));                                                                         // sobresale 40 px -> AVISO
     auto r = analyze(ns, 430, 290);
     for (auto& l : r) std::cout << l << "\n";
     int bad = 0;
     auto expect = [&](const char* needle, int n) { int c = count(r, needle); if (c != n) { std::cout << "FALLO: '" << needle << "' esperado " << n << " y salio " << c << "\n"; ++bad; } };
     expect("textos SOLAPADOS", 2);          // 0.1 <-> 0.2  y  0.8 <-> etiqueta interior del boton 0.6
-    expect("se rozan", 1);                  // Linea A / Linea B
-    expect("fuera de la ventana", 1);
+    expect("se rozan", 2);                  // Linea A / Linea B  y  el boton de cerrar de prueba con la 1.a etiqueta
+    expect("PROBLEMA fuera de la ventana", 1);
+    expect("INFO boton sobresale", 1);
+    expect("AVISO boton fuera de la ventana", 1);
     expect("texto y boton SOLAPADOS", 1);   // 0.8 vs 0.6 (0.8 vs 0.7 solo 5 px: roce); 0.8 no es hijo de ningun boton
     expect("botones SOLAPADOS", 0);         // 10 px de 80 = 12 %: por debajo del 25 %, no se marca
     expect("ACTIVO pero oculto", 1);
